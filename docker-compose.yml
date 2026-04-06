@@ -1,0 +1,131 @@
+# ============================================================
+# SHAKTI — Production Docker Compose
+# All services run on-premise. Zero cloud dependencies.
+# ============================================================
+
+services:
+  # ──────────────────────────────────────────────
+  # PostgreSQL 15 (No pgvector, standard image)
+  # ──────────────────────────────────────────────
+  postgres:
+    image: postgres:15-alpine
+    container_name: shakti-postgres
+    environment:
+      POSTGRES_DB: ${DB_NAME:-shakti_db}
+      POSTGRES_USER: ${DB_USER:-shakti_admin}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-localdevpassword}
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./database/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
+      - ./database/seed.sql:/docker-entrypoint-initdb.d/02-seed.sql
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-shakti_admin} -d ${DB_NAME:-shakti_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - shakti-network
+
+  # ──────────────────────────────────────────────
+  # Backend — Express + Node.js API
+  # ──────────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: shakti-backend
+    environment:
+      DATABASE_URL: postgresql://${DB_USER:-shakti_admin}:${DB_PASSWORD:-localdevpassword}@postgres:5432/${DB_NAME:-shakti_db}
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME:-shakti_db}
+      DB_USER: ${DB_USER:-shakti_admin}
+      DB_PASSWORD: ${DB_PASSWORD:-localdevpassword}
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_ACCESS_EXPIRY: ${JWT_ACCESS_EXPIRY:-15m}
+      JWT_REFRESH_EXPIRY_DAYS: ${JWT_REFRESH_EXPIRY_DAYS:-7}
+      REFRESH_COOKIE_NAME: ${REFRESH_COOKIE_NAME:-shakti_refresh}
+      REFRESH_COOKIE_SAMESITE: ${REFRESH_COOKIE_SAMESITE:-lax}
+      REFRESH_COOKIE_SECURE: ${REFRESH_COOKIE_SECURE:-false}
+      BCRYPT_ROUNDS: ${BCRYPT_ROUNDS:-12}
+      OLLAMA_BASE_URL: http://host.docker.internal:11434
+      OLLAMA_URL: http://host.docker.internal:11434
+      AI_SERVICE_URL: ${AI_SERVICE_URL:-}
+      PORT: 3001
+      NODE_ENV: production
+      UPLOAD_DIR: /app/uploads
+      MAX_FILE_SIZE: ${MAX_FILE_SIZE:-52428800}
+      CHATBOT_DIAGNOSTICS_ENABLED: ${CHATBOT_DIAGNOSTICS_ENABLED:-true}
+      BACKUP_STATUS_FILE: /app/runtime/backup-status.json
+      RESTORE_STATUS_FILE: /app/runtime/restore-status.json
+    ports:
+      - "${BACKEND_PORT:-3001}:3001"
+    volumes:
+      - upload_data:/app/uploads
+      - ./ops:/app/ops
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - shakti-network
+
+  # ──────────────────────────────────────────────
+  # AI Services — Python FastAPI
+  # ──────────────────────────────────────────────
+  ai-services:
+    profiles: ["future"]
+    build:
+      context: ./ai-services
+      dockerfile: Dockerfile
+    container_name: shakti-ai-services
+    environment:
+      OLLAMA_BASE_URL: http://host.docker.internal:11434
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-phi3.5}
+      OLLAMA_TIMEOUT: ${OLLAMA_TIMEOUT:-60000}
+      DATABASE_URL: postgresql://${DB_USER:-shakti_admin}:${DB_PASSWORD:-localdevpassword}@postgres:5432/${DB_NAME:-shakti_db}
+      AI_SERVICE_PORT: 8000
+      AI_SERVICE_HOST: 0.0.0.0
+    ports:
+      - "${AI_SERVICE_PORT:-8000}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - shakti-network
+
+  # ──────────────────────────────────────────────
+  # Frontend — React (Nginx in production)
+  # ──────────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: shakti-frontend
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - shakti-network
+
+volumes:
+  pgdata:
+    name: shakti-pgdata
+  upload_data:
+    name: shakti-uploads
+
+networks:
+  shakti-network:
+    name: shakti-network
+    driver: bridge

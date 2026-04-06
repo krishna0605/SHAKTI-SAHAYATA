@@ -1,0 +1,45 @@
+name: Phase 2 Readiness
+
+on:
+  push:
+    branches:
+      - main
+      - master
+      - 'codex/**'
+  pull_request:
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Backend tests
+        run: npm run test --workspace=backend
+        env:
+          JWT_SECRET: ci_phase2_jwt_secret_value_1234567890
+          ACCESS_TOKEN_EXPIRES_IN: 15m
+          REFRESH_TOKEN_EXPIRES_IN: 7d
+          COOKIE_NAME: shakti_refresh_token
+          COOKIE_SAMESITE: lax
+          COOKIE_SECURE: "false"
+          NODE_ENV: test
+
+      - name: Frontend tests
+        run: npm run test --workspace=frontend
+
+      - name: Frontend build
+        run: npm run build --workspace=frontend
+
+      - name: Bundle budget
+        run: npm run bundle:check

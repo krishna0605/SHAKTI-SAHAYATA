@@ -1,0 +1,112 @@
+import express from 'express';
+import cors from 'cors';
+import helmet from 'helmet';
+import cookieParser from 'cookie-parser';
+import path from 'node:path';
+import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { rateLimit } from './middleware/rateLimit.js';
+import { auditLogger } from './middleware/auditLogger.js';
+import { globalErrorHandler } from './middleware/errorHandler.js';
+import { getLiveHealth, getReadyHealth, getStartupStatus } from './services/runtimeStatus.service.js';
+
+import authRoutes from './routes/auth.js';
+import casesRoutes from './routes/cases.js';
+import filesRoutes from './routes/files.js';
+import dashboardRoutes from './routes/dashboard.js';
+import cdrRoutes from './routes/cdr.js';
+import ipdrRoutes from './routes/ipdr.js';
+import sdrRoutes from './routes/sdr.js';
+import towerRoutes from './routes/tower.js';
+import ildRoutes from './routes/ild.js';
+import auditRoutes from './routes/audit.js';
+import settingsRoutes from './routes/settings.js';
+import officerRoutes from './routes/officerImport.js';
+import chatbotRoutes from './routes/chatbot.js';
+import osintRoutes from './routes/osint.js';
+import systemRoutes from './routes/system.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+export const resolveUploadDir = () => path.resolve(__dirname, process.env.UPLOAD_DIR || './uploads');
+
+export const createApp = () => {
+  const app = express();
+  const uploadDir = resolveUploadDir();
+
+  if (!fs.existsSync(uploadDir)) {
+    fs.mkdirSync(uploadDir, { recursive: true });
+  }
+
+  app.use(helmet({
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
+    contentSecurityPolicy: false,
+  }));
+
+  app.use(cors({
+    origin: (process.env.ALLOWED_ORIGINS || 'http://localhost:5173,http://localhost:3000')
+      .split(',')
+      .map((s) => s.trim()),
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+  }));
+
+  app.use(express.json({ limit: '50mb' }));
+  app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+  app.use(cookieParser());
+  app.use(rateLimit);
+  app.use(auditLogger);
+  app.use('/uploads', express.static(uploadDir));
+
+  app.get('/api/health', (_req, res) => {
+    const ready = getReadyHealth();
+    const httpStatus = ready.status === 'not_ready' ? 503 : 200;
+    res.status(httpStatus).json(ready);
+  });
+
+  app.get('/api/health/live', (_req, res) => {
+    res.json(getLiveHealth());
+  });
+
+  app.get('/api/health/ready', (_req, res) => {
+    const ready = getReadyHealth();
+    const httpStatus = ready.status === 'not_ready' ? 503 : 200;
+    res.status(httpStatus).json(ready);
+  });
+
+  app.get('/api/health/startup', (_req, res) => {
+    const startup = getStartupStatus();
+    const httpStatus = startup.status === 'fail' ? 503 : 200;
+    res.status(httpStatus).json(startup);
+  });
+
+  app.use('/api/auth', authRoutes);
+  app.use('/api/cases', casesRoutes);
+  app.use('/api/files', filesRoutes);
+  app.use('/api/dashboard', dashboardRoutes);
+  app.use('/api/cdr', cdrRoutes);
+  app.use('/api/ipdr', ipdrRoutes);
+  app.use('/api/sdr', sdrRoutes);
+  app.use('/api/tower', towerRoutes);
+  app.use('/api/ild', ildRoutes);
+  app.use('/api/audit', auditRoutes);
+  app.use('/api/settings', settingsRoutes);
+  app.use('/api/officers', officerRoutes);
+  app.use('/api/chatbot', chatbotRoutes);
+  app.use('/api/osint', osintRoutes);
+  app.use('/api/system', systemRoutes);
+  app.post('/api/reset-settings', (_req, res) => {
+    res.json({ success: true, message: 'Legacy reset endpoint is available. No destructive reset was performed.' });
+  });
+
+  app.use((req, res) => {
+    res.status(404).json({ error: 'Route not found', path: req.originalUrl });
+  });
+
+  app.use(globalErrorHandler);
+
+  return app;
+};
+

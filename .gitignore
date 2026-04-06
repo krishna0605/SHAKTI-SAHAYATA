@@ -1,0 +1,90 @@
+# ========================
+# Dependencies
+# ========================
+node_modules/
+**/node_modules/
+
+# ========================
+# Environment / Secrets
+# ========================
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# ========================
+# Build / Cache Output
+# ========================
+dist/
+build/
+coverage/
+.nyc_output/
+.cache/
+.eslintcache
+.vite/
+*.tsbuildinfo
+
+# ========================
+# Python
+# ========================
+__pycache__/
+*.py[cod]
+.python-version
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+
+# ========================
+# Test / Automation Artifacts
+# ========================
+playwright-report/
+test-results/
+blob-report/
+frontend/build_output.txt
+test_response.txt
+
+# ========================
+# Runtime Data
+# ========================
+backend/uploads/*
+!backend/uploads/.gitkeep
+backend/runtime/
+ops/backups/
+ops/restores/
+ops/runtime/
+
+# ========================
+# Logs / Temp Files
+# ========================
+*.log
+*.pid
+*.seed
+*.tmp
+*.temp
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# ========================
+# IDE / Editor
+# ========================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ========================
+# OS Files
+# ========================
+.DS_Store
+Thumbs.db
+
+# ========================
+# Docker
+# ========================
+docker-compose.override.yml

@@ -1,0 +1,56 @@
+# ============================================================
+# SHAKTI — Development Overrides
+# Usage: docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+# ============================================================
+
+services:
+  # Dev: Mount source for hot reload
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.dev
+    volumes:
+      - ./backend:/app
+      - /app/node_modules
+      - ./backend/uploads:/app/uploads
+      - ./ops:/app/ops
+    environment:
+      NODE_ENV: development
+      OLLAMA_BASE_URL: http://host.docker.internal:11434
+      OLLAMA_URL: http://host.docker.internal:11434
+      CHATBOT_DIAGNOSTICS_ENABLED: ${CHATBOT_DIAGNOSTICS_ENABLED:-true}
+      REFRESH_COOKIE_SECURE: ${REFRESH_COOKIE_SECURE:-false}
+      BACKUP_STATUS_FILE: /app/runtime/backup-status.json
+      RESTORE_STATUS_FILE: /app/runtime/restore-status.json
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command: npx nodemon index.js
+
+  # Dev: Vite HMR instead of nginx
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    environment:
+      VITE_API_URL: http://localhost:3001
+      VITE_AI_URL: http://localhost:8000
+    command: npm run dev -- --host 0.0.0.0
+
+  # Dev: Mount source for hot reload
+  ai-services:
+    profiles: ["future"]
+    build:
+      context: ./ai-services
+      dockerfile: Dockerfile.dev
+    volumes:
+      - ./ai-services:/app
+    environment:
+      OLLAMA_BASE_URL: http://host.docker.internal:11434
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
