@@ -270,6 +270,12 @@ export const fileAPI = {
     return normalizeFileListResponse(payload)
   },
 
+  async remove(fileId: string | number): Promise<{ fileId: number; deleted: boolean; deletedRecords: number; deletedType: string }> {
+    return apiClient.request(`/files/${encodeURIComponent(String(fileId))}`, {
+      method: 'DELETE',
+    })
+  },
+
   async getDownloadUrl(filePath: string): Promise<string> {
     const data = await apiClient.request<{ url: string }>(`/files/download-url?path=${encodeURIComponent(filePath)}`)
     return buildAbsoluteDownloadUrl(data.url)
@@ -291,12 +297,33 @@ export const recordCountAPI = {
 /*  CDR API                                                           */
 /* ------------------------------------------------------------------ */
 export const cdrAPI = {
-  async insertRecords(caseId: string, records: ApiRecord[], fileId?: string) {
-    const data = await apiClient.request<{ inserted?: number }>('/cdr/records', {
-      method: 'POST',
-      body: { caseId, records, fileId },
-    })
-    return data.inserted || 0
+  async insertRecords(
+    caseId: string,
+    records: ApiRecord[],
+    fileId?: string,
+    options?: {
+      chunkSize?: number
+      onProgress?: (inserted: number, total: number) => void
+    }
+  ) {
+    const total = Array.isArray(records) ? records.length : 0
+    if (total === 0) return 0
+
+    const chunkSize = Math.max(100, options?.chunkSize ?? 1000)
+    let insertedTotal = 0
+
+    for (let i = 0; i < total; i += chunkSize) {
+      const chunk = records.slice(i, i + chunkSize)
+      const data = await apiClient.request<{ inserted?: number }>('/cdr/records', {
+        method: 'POST',
+        body: { caseId, records: chunk, fileId },
+      })
+      const inserted = Number(data.inserted || 0)
+      insertedTotal += inserted
+      options?.onProgress?.(Math.min(insertedTotal, total), total)
+    }
+
+    return insertedTotal
   },
 
   async getCountByCase(caseId: string): Promise<number> {

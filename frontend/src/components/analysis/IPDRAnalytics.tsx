@@ -3,9 +3,9 @@ import { ResponsiveContainer, LineChart, Line, CartesianGrid, XAxis, YAxis, Tool
 import { MapContainer, TileLayer, CircleMarker, Popup, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { parseIPDR, type IPDROperator, type NormalizedIPDR } from '../utils/ipdrNormalization';
+import { type NormalizedIPDR } from '../utils/ipdrNormalization';
 import * as XLSX from 'xlsx-js-style';
-import { ipdrAPI, ipdrFileAPI } from '../lib/apis';
+import { ipdrAPI } from '../lib/apis';
 import { encodeSpreadsheetRows } from '../lib/security';
 import { RecordTable } from './RecordTable';
 import { AnalysisTabBar } from './AnalysisTabBar';
@@ -31,44 +31,6 @@ const MODULES: ModuleConfig[] = [
   { id: 'sim_multi_imei', title: 'SIM Multi IMEI', icon: 'perm_device_information', tag: 'DETECTION', color: 'lime' },
   { id: 'roaming_summary', title: 'Other State Summary', icon: 'map', tag: 'ROAMING', color: 'violet' },
 ];
-
-const pickBestIpdrSheet = (workbook: XLSX.WorkBook) => {
-  const keyword = /(ipdr|gprs|data|internet|packet|session|cdr|usage|traffic)/i;
-  const headerKeyword = /(msisdn|imsi|imei|source.?ip|destination.?ip|session|apn|pgw|uplink|downlink)/i;
-  let bestName = workbook.SheetNames[0] || '';
-  let bestScore = -1;
-  for (const name of workbook.SheetNames) {
-    const ws = workbook.Sheets[name];
-    if (!ws) continue;
-    const sampleRows: string[][] = XLSX.utils.sheet_to_json(ws, { header: 1, blankrows: false, defval: '' }) as string[][];
-    const headerLine = (sampleRows[0] || []).join(' ');
-    const rowCount = sampleRows.length;
-    let score = 0;
-    if (keyword.test(name)) score += 6;
-    if (headerKeyword.test(headerLine)) score += 8;
-    score += Math.min(6, Math.floor(rowCount / 500));
-    if (score > bestScore) {
-      bestScore = score;
-      bestName = name;
-    }
-  }
-  return bestName;
-};
-
-const readTabularFileAsCsv = async (file: File): Promise<{ content: string; sheetName?: string }> => {
-  const lowerName = file.name.toLowerCase();
-  if (lowerName.endsWith('.xlsx') || lowerName.endsWith('.xls')) {
-    const buffer = await file.arrayBuffer();
-    const workbook = XLSX.read(buffer, { type: 'array' });
-    const selectedSheet = pickBestIpdrSheet(workbook);
-    if (!selectedSheet) return { content: '' };
-    return {
-      content: XLSX.utils.sheet_to_csv(workbook.Sheets[selectedSheet]),
-      sheetName: selectedSheet
-    };
-  }
-  return { content: await file.text() };
-};
 
 const toFiniteNumber = (value: unknown, fallback = 0) => {
   if (typeof value === 'number') return Number.isFinite(value) ? value : fallback;
@@ -621,11 +583,8 @@ export default function IPDRAnalytics({ caseId, caseName, operator, parsedData, 
   const [currentTime, setCurrentTime] = useState(new Date());
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage] = useState(50);
-  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
-  const [uploadStatus, setUploadStatus] = useState<'idle' | 'uploading' | 'success' | 'error'>('idle');
   const [isExporting, setIsExporting] = useState(false);
-  const [fileCountState, setFileCountState] = useState(fileCount);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const fileCountState = fileCount;
   const attemptedCaseBackfillRef = useRef<string | null>(null);
 
   const [msisdnFilter, setMsisdnFilter] = useState('');
@@ -1082,53 +1041,6 @@ export default function IPDRAnalytics({ caseId, caseName, operator, parsedData, 
   const showingStart = filteredData.length === 0 ? 0 : (currentPage - 1) * itemsPerPage + 1;
   const showingEnd = Math.min(currentPage * itemsPerPage, filteredData.length);
 
-  const handleAddFilesClick = () => {
-    fileInputRef.current?.click();
-  };
-
-  const handleAddFilesSelected = (files: FileList | null) => {
-    if (!files || files.length === 0) return;
-    const list = Array.from(files);
-    setSelectedFiles(prev => [...prev, ...list]);
-  };
-
-  const handleUploadFilesToCase = async () => {
-    if (!caseId || !operator || selectedFiles.length === 0) return;
-    try {
-      setUploadStatus('uploading');
-      let allParsed: NormalizedIPDR[] = [];
-      for (let i = 0; i < selectedFiles.length; i++) {
-        const file = selectedFiles[i];
-        const parsedFile = await readTabularFileAsCsv(file);
-        const content = parsedFile.content;
-        const fileIndex = fileCountState + i;
-        if (parsedFile.sheetName) {
-          console.log(`[IPDRAnalytics] Selected sheet for ${file.name}: ${parsedFile.sheetName}`);
-        }
-        const parsed = parseIPDR(content, operator as IPDROperator).map(r => ({ ...r, file_index: fileIndex, file_name: file.name }));
-        allParsed = allParsed.concat(parsed);
-        await ipdrFileAPI.upload(caseId, file, operator);
-      }
-      const inserted = await ipdrAPI.insertRecords(caseId, allParsed, undefined, { chunkSize: 1000 });
-      if (inserted <= 0 && allParsed.length > 0) {
-        throw new Error('No IPDR records were inserted into the database.');
-      }
-      try {
-        await ipdrAPI.enrichCase(caseId, 5000);
-      } catch (enrichError) {
-        console.warn('[IPDRAnalytics] IP intelligence backfill skipped:', enrichError);
-      }
-      await loadCaseData();
-      setFileCountState(prev => prev + selectedFiles.length);
-      setSelectedFiles([]);
-      setUploadStatus('success');
-    } catch {
-      setUploadStatus('error');
-    } finally {
-      setTimeout(() => setUploadStatus('idle'), 1500);
-    }
-  };
-
   const handleExportExcel = async () => {
     if (isExporting) return;
     try {
@@ -1165,31 +1077,6 @@ export default function IPDRAnalytics({ caseId, caseName, operator, parsedData, 
             <p className="text-xs text-slate-500">{caseName} • {operator || 'AUTO'}</p>
           </div>
           <div className="flex flex-wrap items-center gap-4">
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".csv,.xls,.xlsx"
-              multiple
-              className="hidden"
-              onChange={(e) => handleAddFilesSelected(e.target.files)}
-            />
-            <button
-              onClick={handleAddFilesClick}
-              className="flex items-center gap-2 px-3 py-1 rounded-lg bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-700 transition-colors"
-            >
-              <span className="material-symbols-outlined text-sm">attach_file</span>
-              Add Files
-            </button>
-            {selectedFiles.length > 0 && (
-              <button
-                onClick={handleUploadFilesToCase}
-                className="flex items-center gap-2 px-3 py-1 rounded-lg bg-indigo-600 text-white text-xs font-bold hover:bg-indigo-700 transition-colors disabled:opacity-50"
-                disabled={uploadStatus === 'uploading'}
-              >
-                <span className="material-symbols-outlined text-sm">cloud_upload</span>
-                Upload {selectedFiles.length}
-              </button>
-            )}
             <button onClick={handleExportExcel} disabled={isExporting} className="px-3 py-1 rounded-lg bg-blue-600 text-white text-xs font-bold hover:bg-blue-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed">{isExporting ? 'Exporting...' : 'Export Excel'}</button>
           </div>
         </div>

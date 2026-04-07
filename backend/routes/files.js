@@ -1,12 +1,16 @@
 import { Router } from 'express';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import pool from '../config/database.js';
 import { authenticateToken } from '../middleware/auth.js';
 import { upload, handleUploadError } from '../middleware/upload.js';
 import { classifyFile, extractHeadersFromFile } from '../services/fileClassifier.js';
 
 const router = Router();
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const uploadDir = path.resolve(__dirname, '..', process.env.UPLOAD_DIR || './uploads');
 
 router.use(authenticateToken);
 
@@ -26,6 +30,12 @@ const buildFileResponse = (file, classification) => ({
   confidence: classification?.confidence ?? null,
   classification_result: classification?.result || null
 });
+
+const normalizeFileType = (value = '') => {
+  const normalized = normalizeExpectedType(value);
+  if (normalized === 'tower_dump') return 'tower';
+  return normalized;
+};
 
 const ensureCaseAccess = async ({ caseId, userId, role }) => {
   if (!caseId || !userId) return false;
@@ -63,7 +73,7 @@ const removeUploadedFile = (filePath) => {
   }
 };
 
-const insertAuditLog = async ({ user, fileId, details }) => {
+const insertAuditLog = async ({ user, fileId, action = 'FILE_UPLOAD', details }) => {
   await pool.query(
     `
       INSERT INTO audit_logs (user_id, officer_buckle_id, officer_name, action, resource_type, resource_id, details)
@@ -73,7 +83,7 @@ const insertAuditLog = async ({ user, fileId, details }) => {
       user.userId,
       user.buckleId,
       user.fullName,
-      'FILE_UPLOAD',
+      action,
       'file',
       String(fileId),
       JSON.stringify(details)
@@ -94,6 +104,26 @@ const listFilesForCase = async (caseId) => {
   );
 
   return result.rows;
+};
+
+const getFileById = async (fileId) => {
+  const result = await pool.query(
+    `
+      SELECT
+        uf.*,
+        fc.expected_type,
+        fc.detected_type,
+        fc.confidence,
+        fc.classification_result
+      FROM uploaded_files uf
+      LEFT JOIN file_classifications fc ON fc.file_id = uf.id
+      WHERE uf.id = $1
+      LIMIT 1
+    `,
+    [fileId]
+  );
+
+  return result.rows[0] || null;
 };
 
 router.post('/upload/:type?', upload.single('file'), handleUploadError, async (req, res) => {
@@ -246,6 +276,120 @@ router.get('/', async (req, res) => {
   } catch (err) {
     console.error('[FILES] List error:', err.message);
     res.status(500).json({ error: 'Failed to fetch files' });
+  }
+});
+
+router.delete('/:fileId', async (req, res) => {
+  const fileId = Number(req.params.fileId || 0);
+
+  try {
+    if (!fileId || Number.isNaN(fileId)) {
+      return res.status(400).json({ error: 'fileId is required' });
+    }
+
+    const fileRecord = await getFileById(fileId);
+    if (!fileRecord) {
+      return res.status(404).json({ error: 'File not found' });
+    }
+
+    const canAccess = await ensureCaseAccess({
+      caseId: fileRecord.case_id,
+      userId: req.user.userId,
+      role: req.user.role
+    });
+
+    if (!canAccess) {
+      return res.status(403).json({ error: 'No access to this case' });
+    }
+
+    const caseLockResult = await pool.query(
+      'SELECT is_evidence_locked, lock_reason FROM cases WHERE id = $1 LIMIT 1',
+      [fileRecord.case_id]
+    );
+
+    if (caseLockResult.rows[0]?.is_evidence_locked) {
+      return res.status(423).json({
+        error: 'Case is evidence-locked for legal proceedings',
+        reason: caseLockResult.rows[0].lock_reason,
+        message: 'Contact Super Admin to unlock'
+      });
+    }
+
+    const db = await pool.connect();
+    let deletedRecords = 0;
+
+    try {
+      await db.query('BEGIN');
+
+      const telecomTables = [
+        'cdr_records',
+        'ipdr_records',
+        'sdr_records',
+        'tower_dump_records',
+        'ild_records',
+      ];
+
+      for (const tableName of telecomTables) {
+        const deletion = await db.query(`DELETE FROM ${tableName} WHERE file_id = $1 RETURNING id`, [fileId]);
+        deletedRecords += deletion.rowCount || 0;
+      }
+
+      await db.query('DELETE FROM file_classifications WHERE file_id = $1', [fileId]);
+
+      const deletedFile = await db.query(
+        'DELETE FROM uploaded_files WHERE id = $1 RETURNING id',
+        [fileId]
+      );
+
+      if ((deletedFile.rowCount || 0) === 0) {
+        throw new Error('Uploaded file could not be deleted');
+      }
+
+      await db.query(
+        `
+          INSERT INTO audit_logs (user_id, officer_buckle_id, officer_name, action, resource_type, resource_id, details)
+          VALUES ($1, $2, $3, $4, $5, $6, $7)
+        `,
+        [
+          req.user.userId,
+          req.user.buckleId,
+          req.user.fullName,
+          'FILE_DELETE',
+          'file',
+          String(fileId),
+          JSON.stringify({
+            caseId: fileRecord.case_id,
+            fileName: fileRecord.original_name,
+            storedFileName: fileRecord.file_name,
+            deletedRecords,
+            deletedType: normalizeFileType(
+              fileRecord.detected_type || fileRecord.expected_type || fileRecord.file_type
+            ),
+          }),
+        ]
+      );
+
+      await db.query('COMMIT');
+    } catch (error) {
+      await db.query('ROLLBACK');
+      throw error;
+    } finally {
+      db.release();
+    }
+
+    removeUploadedFile(path.join(uploadDir, fileRecord.file_name));
+
+    return res.json({
+      fileId,
+      deleted: true,
+      deletedRecords,
+      deletedType: normalizeFileType(
+        fileRecord.detected_type || fileRecord.expected_type || fileRecord.file_type
+      ),
+    });
+  } catch (err) {
+    console.error('[FILES] Delete error:', err.message);
+    return res.status(500).json({ error: 'Failed to delete file' });
   }
 });
 

@@ -1,7 +1,6 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import type { NormalizedCDR } from '../utils/normalization';
 import { cdrAPI, fileAPI } from '../lib/apis';
-import { parseCSV, type Operator } from '../utils/normalization';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   LineChart, Line, PieChart, Pie, Cell, Legend
@@ -745,10 +744,7 @@ export const AdvancedAnalytics: React.FC<AdvancedAnalyticsProps> = ({ caseId, ca
   const [selectedTab, setSelectedTab] = useState<'overview' | 'records' | 'analysis' | 'location'>('overview');
   const [chartRenderKey, setChartRenderKey] = useState(0);
   const [currentTime, setCurrentTime] = useState(new Date());
-  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
-  const [uploadStatus, setUploadStatus] = useState<'idle' | 'uploading' | 'success' | 'error'>('idle');
   const [isExporting, setIsExporting] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploadedFiles, setUploadedFiles] = useState<{ id: number; file_name: string }[]>([]);
   const [selectedFileKeys, setSelectedFileKeys] = useState<string[]>([]);
   const [filesInitialized, setFilesInitialized] = useState(false);
@@ -805,8 +801,7 @@ export const AdvancedAnalytics: React.FC<AdvancedAnalyticsProps> = ({ caseId, ca
       setIsLoading(true);
       const cdrData = await cdrAPI.getRecordsByCase(caseId);
       if (cdrData) {
-        const limited = Array.isArray(cdrData) ? cdrData.slice(0, 2000) : [];
-        setData(limited as NormalizedCDR[]);
+        setData((Array.isArray(cdrData) ? cdrData : []) as NormalizedCDR[]);
       }
     } catch (error) {
       console.error('Error loading case data:', error);
@@ -945,61 +940,6 @@ export const AdvancedAnalytics: React.FC<AdvancedAnalyticsProps> = ({ caseId, ca
       setIsExporting(false);
     }
   };
-
-  const handleAddFilesClick = () => {
-    fileInputRef.current?.click();
-  };
-
-  const handleAddFilesSelected = (files: FileList | null) => {
-    if (!files || files.length === 0) return;
-    const list = Array.from(files);
-    setSelectedFiles(prev => [...prev, ...list]);
-  };
-
-  const handleUploadFilesToCase = async () => {
-    if (!caseId || !operator || selectedFiles.length === 0) return;
-    try {
-      setUploadStatus('uploading');
-      let allParsed: NormalizedCDR[] = [];
-      for (let i = 0; i < selectedFiles.length; i++) {
-        const file = selectedFiles[i];
-        const content = await file.text();
-        const uploaded = await fileAPI.upload(caseId, file, operator, 'cdr');
-        const parsed = parseCSV(content, operator as Operator).map(r => ({
-          ...r,
-          file_index: i,
-          file_id: uploaded?.id,
-          file_name: file.name
-        }));
-        allParsed = allParsed.concat(parsed);
-      }
-      try {
-        await cdrAPI.insertRecords(caseId, allParsed);
-      } catch (insertError: unknown) {
-        const message = insertError instanceof Error ? insertError.message : String(insertError);
-        console.warn('[AdvancedAnalytics] Insert failed for added files:', message);
-      }
-      await loadCaseData();
-      await fileAPI.listByCase(caseId)
-        .then((files) => {
-          const mapped = Array.isArray(files)
-            ? files.map(file => ({ id: file.id, file_name: file.file_name }))
-            : [];
-          setUploadedFiles(mapped);
-        })
-        .catch(() => {
-          setUploadedFiles([]);
-        });
-      setSelectedFiles([]);
-      setUploadStatus('success');
-    } catch {
-      setUploadStatus('error');
-    } finally {
-      setTimeout(() => setUploadStatus('idle'), 1500);
-    }
-  };
-
-  
 
   // --- DATA PROCESSING HOOKS ---
 
@@ -1543,31 +1483,6 @@ export const AdvancedAnalytics: React.FC<AdvancedAnalyticsProps> = ({ caseId, ca
           </div>
         </div>
         <div className="flex items-center gap-4">
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".csv,.xls,.xlsx"
-            multiple
-            className="hidden"
-            onChange={(e) => handleAddFilesSelected(e.target.files)}
-          />
-          <button
-            onClick={handleAddFilesClick}
-            className="flex items-center gap-2 px-3 py-1 rounded-lg bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-700 transition-colors"
-          >
-            <span className="material-symbols-outlined text-sm">attach_file</span>
-            Add Files
-          </button>
-          {selectedFiles.length > 0 && (
-            <button
-              onClick={handleUploadFilesToCase}
-              className="flex items-center gap-2 px-3 py-1 rounded-lg bg-indigo-600 text-white text-xs font-bold hover:bg-indigo-700 transition-colors disabled:opacity-50"
-              disabled={uploadStatus === 'uploading'}
-            >
-              <span className="material-symbols-outlined text-sm">cloud_upload</span>
-              Upload {selectedFiles.length}
-            </button>
-          )}
           <div className="relative">
             <button
               onClick={() => setIsReportMenuOpen(v => !v)}

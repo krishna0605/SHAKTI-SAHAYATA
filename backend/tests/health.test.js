@@ -60,6 +60,7 @@ vi.mock('../services/chatbot/config.js', () => ({
 
 vi.mock('../middleware/rateLimit.js', () => ({
   rateLimit: (_req, _res, next) => next(),
+  authRateLimit: (_req, _res, next) => next(),
 }));
 
 vi.mock('../middleware/auditLogger.js', () => ({
@@ -111,4 +112,3 @@ describe('health endpoints', () => {
     expect(response.body.checks.uploads.status).toBe('pass');
   });
 });
-

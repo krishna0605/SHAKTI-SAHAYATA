@@ -270,9 +270,10 @@ export async function ingestCaseUploads({
 
     for (let fileIndex = 0; fileIndex < slot.files.length; fileIndex += 1) {
       const file = slot.files[fileIndex]
+      const fileOrdinalLabel = `${fileIndex + 1}/${slot.files.length}`
 
       try {
-        onProgress?.(slot.key, `Parsing ${file.name}...`)
+        onProgress?.(slot.key, `Parsing ${fileOrdinalLabel}: ${file.name}...`)
         const parsedRecords = await parseRecordsForSlot(slot.key, file, fileIndex, operator)
 
         if (!Array.isArray(parsedRecords) || parsedRecords.length === 0) {
@@ -280,7 +281,7 @@ export async function ingestCaseUploads({
         }
 
         await yieldToUI()
-        onProgress?.(slot.key, `Uploading ${file.name}...`)
+        onProgress?.(slot.key, `Uploading ${fileOrdinalLabel}: ${file.name}...`)
         const uploadedFile = await fileAPI.upload(String(caseId), file, operator, slot.key)
 
         if (!uploadedFile?.id) {
@@ -288,7 +289,7 @@ export async function ingestCaseUploads({
         }
 
         await yieldToUI()
-        onProgress?.(slot.key, `Saving ${parsedRecords.length} ${SLOT_LABELS[slot.key]} records from ${file.name}...`)
+        onProgress?.(slot.key, `Saving ${parsedRecords.length} ${SLOT_LABELS[slot.key]} records from ${fileOrdinalLabel}: ${file.name}...`)
         const insertedCount = await insertRecordsForSlot(
           slot.key,
           caseId,
@@ -304,7 +305,7 @@ export async function ingestCaseUploads({
 
         onProgress?.(
           slot.key,
-          `Processed ${file.name}: inserted ${insertedCount}/${parsedRecords.length} ${SLOT_LABELS[slot.key]} records`
+          `Processed ${fileOrdinalLabel}: ${file.name} (${insertedCount}/${parsedRecords.length} ${SLOT_LABELS[slot.key]} records)`
         )
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error)

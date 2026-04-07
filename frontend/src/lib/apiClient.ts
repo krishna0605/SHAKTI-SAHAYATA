@@ -2,6 +2,20 @@ let inMemoryAccessToken: string | null = null
 let authFailureHandler: (() => void) | null = null
 let refreshPromise: Promise<boolean> | null = null
 
+export class ApiError extends Error {
+  status: number
+  code?: string
+  retryAfter?: number | null
+
+  constructor(message: string, status: number, code?: string, retryAfter?: number | null) {
+    super(message)
+    this.name = 'ApiError'
+    this.status = status
+    this.code = code
+    this.retryAfter = retryAfter ?? null
+  }
+}
+
 const redirectToLogin = () => {
   if (typeof window === 'undefined') return
   if (window.location.pathname !== '/login') {
@@ -52,6 +66,21 @@ type RequestOptions = {
   retryOn401?: boolean
 }
 
+const buildApiError = (
+  response: Response,
+  data?: { error?: string; code?: string }
+) => {
+  const retryAfterHeader = response.headers.get('retry-after')
+  const retryAfter = retryAfterHeader ? Number(retryAfterHeader) || null : null
+
+  return new ApiError(
+    data?.error || `Request failed with status ${response.status}`,
+    response.status,
+    data?.code,
+    retryAfter
+  )
+}
+
 const parseResponsePayload = async <T>(response: Response): Promise<T> => {
   const raw = await response.text()
   if (!raw) return null as T
@@ -89,6 +118,10 @@ class CanonicalApiClient {
           },
         })
 
+        if (response.status === 429) {
+          throw buildApiError(response, data)
+        }
+
         if (!response.ok || !data?.accessToken) {
           clearAccessToken()
           authFailureHandler?.()
@@ -98,7 +131,10 @@ class CanonicalApiClient {
 
         setAccessToken(data.accessToken)
         return true
-      } catch {
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 429) {
+          throw error
+        }
         clearAccessToken()
         authFailureHandler?.()
         if (redirectOn401) redirectToLogin()
@@ -153,7 +189,7 @@ class CanonicalApiClient {
         return this.request<T>(endpoint, { ...options, retryOn401: false })
       }
 
-      throw new Error('Session expired. Please sign in again.')
+      throw new ApiError('Session expired. Please sign in again.', 401)
     }
 
     const data = await parseResponsePayload<T & { error?: string }>(response)
@@ -163,7 +199,7 @@ class CanonicalApiClient {
         authFailureHandler?.()
         redirectToLogin()
       }
-      throw new Error(data?.error || `Request failed with status ${response.status}`)
+      throw buildApiError(response, data)
     }
 
     return data

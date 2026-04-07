@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { apiClient, clearAccessToken, registerAuthFailureHandler, setAccessToken } from '../lib/apiClient'
+import { ApiError, apiClient, clearAccessToken, registerAuthFailureHandler, setAccessToken } from '../lib/apiClient'
 
 interface User {
   id: number
@@ -72,7 +72,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       }
 
       get().setAuth(data.accessToken, data.user, data.session ?? null)
-    } catch {
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 429) {
+        return
+      }
       get().clearAuth()
     }
   },

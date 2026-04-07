@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { useAuthStore } from './authStore'
-import { apiClient } from '../lib/apiClient'
+import { ApiError, apiClient } from '../lib/apiClient'
 
 describe('authStore bootstrap', () => {
   afterEach(() => {
@@ -43,5 +43,25 @@ describe('authStore bootstrap', () => {
     expect(state.token).toBeNull()
     expect(state.user).toBeNull()
   })
-})
 
+  it('preserves existing auth state when bootstrap is rate limited', async () => {
+    useAuthStore.getState().setAuth('live-token', {
+      id: 7,
+      buckleId: 'BK-429',
+      email: 'investigator@police.gov.in',
+      fullName: 'Riya Singh',
+      role: 'investigator',
+    })
+
+    vi.spyOn(apiClient, 'request').mockRejectedValue(
+      new ApiError('Too many requests. Please try again later.', 429, 'RATE_LIMIT_EXCEEDED')
+    )
+
+    await useAuthStore.getState().bootstrapAuth()
+
+    const state = useAuthStore.getState()
+    expect(state.authStatus).toBe('authenticated')
+    expect(state.token).toBe('live-token')
+    expect(state.user?.buckleId).toBe('BK-429')
+  })
+})

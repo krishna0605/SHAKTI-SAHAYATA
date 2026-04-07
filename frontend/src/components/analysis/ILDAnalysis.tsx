@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ResponsiveContainer, LineChart, Line, CartesianGrid, XAxis, YAxis, Tooltip, BarChart, Bar, PieChart, Pie, Cell, Legend } from 'recharts';
 import { MapContainer, TileLayer, CircleMarker, Popup, useMap } from 'react-leaflet';
 import L from 'leaflet';
@@ -7,8 +7,8 @@ import * as XLSX from 'xlsx-js-style';
 import { encodeSpreadsheetRows } from '../lib/security';
 import { RecordTable } from './RecordTable';
 import { AnalysisTabBar } from './AnalysisTabBar';
-import { parseILD, type ILDOperator, type NormalizedILD } from '../utils/ildNormalization';
-import { ildAPI, ildFileAPI } from '../lib/apis';
+import { type NormalizedILD } from '../utils/ildNormalization';
+import { ildAPI } from '../lib/apis';
 
 interface ILDAnalysisProps {
   caseId?: string;
@@ -477,11 +477,8 @@ export const ILDAnalysis: React.FC<ILDAnalysisProps> = ({ caseId, caseName, oper
   const [isLoading, setIsLoading] = useState(!parsedData || parsedData.length === 0);
   const [selectedTab, setSelectedTab] = useState<TabId>('overview');
   const [currentTime, setCurrentTime] = useState(new Date());
-  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
-  const [uploadStatus, setUploadStatus] = useState<'idle' | 'uploading' | 'success' | 'error'>('idle');
   const [isExporting, setIsExporting] = useState(false);
-  const [fileCountState, setFileCountState] = useState(fileCount);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const fileCountState = fileCount;
 
   const [searchTerm, setSearchTerm] = useState('');
   const [callTypeFilter, setCallTypeFilter] = useState('');
@@ -541,46 +538,6 @@ export const ILDAnalysis: React.FC<ILDAnalysisProps> = ({ caseId, caseName, oper
       setIsLoading(false);
     }
   }, [caseId, parsedData, loadCaseData]);
-
-  const handleAddFilesClick = () => {
-    fileInputRef.current?.click();
-  };
-
-  const handleAddFilesSelected = (files: FileList | null) => {
-    if (!files || files.length === 0) return;
-    const list = Array.from(files);
-    setSelectedFiles(prev => [...prev, ...list]);
-  };
-
-  const handleUploadFilesToCase = async () => {
-    if (!caseId || !operator || selectedFiles.length === 0) return;
-    try {
-      setUploadStatus('uploading');
-      let allParsed: NormalizedILD[] = [];
-      for (let i = 0; i < selectedFiles.length; i++) {
-        const file = selectedFiles[i];
-        const content = await file.text();
-        const fileIndex = fileCountState + i;
-        const parsed = parseILD(content, operator as ILDOperator).map(r => ({ ...r, file_index: fileIndex, file_name: file.name }));
-        allParsed = allParsed.concat(parsed);
-        await ildFileAPI.upload(caseId, file, operator);
-      }
-      try {
-        await ildAPI.insertRecords(caseId, allParsed);
-      } catch (insertError: unknown) {
-        const message = insertError instanceof Error ? insertError.message : String(insertError);
-        console.warn('[ILDAnalysis] Insert failed for added files:', message);
-      }
-      await loadCaseData();
-      setFileCountState(prev => prev + selectedFiles.length);
-      setSelectedFiles([]);
-      setUploadStatus('success');
-    } catch {
-      setUploadStatus('error');
-    } finally {
-      setTimeout(() => setUploadStatus('idle'), 1500);
-    }
-  };
 
   const handleExportExcel = async () => {
     if (isExporting) return;
@@ -786,31 +743,6 @@ export const ILDAnalysis: React.FC<ILDAnalysisProps> = ({ caseId, caseName, oper
           </div>
         </div>
         <div className="flex items-center gap-4">
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".csv,.xls,.xlsx"
-            multiple
-            className="hidden"
-            onChange={(e) => handleAddFilesSelected(e.target.files)}
-          />
-          <button
-            onClick={handleAddFilesClick}
-            className="flex items-center gap-2 px-3 py-1 rounded-lg bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-700 transition-colors"
-          >
-            <span className="material-symbols-outlined text-sm">attach_file</span>
-            Add Files
-          </button>
-          {selectedFiles.length > 0 && (
-            <button
-              onClick={handleUploadFilesToCase}
-              className="flex items-center gap-2 px-3 py-1 rounded-lg bg-indigo-600 text-white text-xs font-bold hover:bg-indigo-700 transition-colors disabled:opacity-50"
-              disabled={uploadStatus === 'uploading'}
-            >
-              <span className="material-symbols-outlined text-sm">cloud_upload</span>
-              Upload {selectedFiles.length}
-            </button>
-          )}
           <button onClick={handleExportExcel} disabled={isExporting} className="flex items-center gap-2 px-3 py-1 rounded-lg bg-amber-600 text-white text-xs font-bold hover:bg-amber-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed">
             <span className={`material-symbols-outlined text-sm ${isExporting ? 'animate-spin' : ''}`}>{isExporting ? 'progress_activity' : 'file_download'}</span>
             {isExporting ? 'Exporting...' : 'Export Excel'}

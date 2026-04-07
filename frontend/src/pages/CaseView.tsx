@@ -1,6 +1,7 @@
-import { useState, useEffect, lazy, Suspense } from 'react';
+import { useState, useEffect, lazy, Suspense, useMemo, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { caseAPI, fileAPI, recordCountAPI } from '../components/lib/apis';
+import { ingestCaseUploads, type CaseUploadSlotKey } from '../lib/caseFileIngestion';
 import { useCaseContextStore } from '../stores/caseContextStore';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -14,6 +15,7 @@ import {
 import { Card, CardContent } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
+import { toast } from 'sonner';
 
 const DATA_TYPES = [
   { key: 'cdr', label: 'CDR', icon: '📞', desc: 'Call Detail Records' },
@@ -28,13 +30,6 @@ const tiltCardClass =
 
 const tiltShellClass =
   'transform-gpu transition duration-300 hover:[transform:perspective(1800px)_rotateX(1.5deg)_rotateY(-1.5deg)_translateY(-2px)]';
-
-// Lazy-load analysis & upload components (named exports → default via .then)
-const CDRUpload = lazy(() => import('../components/upload/CDRUpload').then(m => ({ default: m.CDRUpload })));
-const IPDRUpload = lazy(() => import('../components/upload/IPDRUpload').then(m => ({ default: m.IPDRUpload })));
-const SDRUpload = lazy(() => import('../components/upload/SDRUpload').then(m => ({ default: m.SDRUpload })));
-const TowerDumpUpload = lazy(() => import('../components/upload/TowerDumpUpload').then(m => ({ default: m.TowerDump })));
-const ILDUpload = lazy(() => import('../components/upload/ILDUpload').then(m => ({ default: m.ILDUpload })));
 
 const CDRAdvancedAnalysis = lazy(() => import('../components/analysis/CDRAdvancedAnalysis').then(m => ({ default: m.AdvancedAnalytics })));
 // IPDRAnalytics already has a default export
@@ -68,6 +63,52 @@ interface TimelineEvent {
   details: Record<string, unknown>;
 }
 
+const DATA_TYPE_FILE_ALIASES: Record<string, string[]> = {
+  cdr: ['cdr'],
+  ipdr: ['ipdr'],
+  sdr: ['sdr'],
+  tower: ['tower', 'tower_dump', 'tower dump'],
+  ild: ['ild'],
+};
+
+const FILE_TAB_ORDER = ['cdr', 'ipdr', 'sdr', 'tower', 'ild'] as const;
+type FileTabKey = (typeof FILE_TAB_ORDER)[number];
+
+const FILE_TAB_LABELS: Record<FileTabKey, string> = {
+  cdr: 'CDR',
+  ipdr: 'IPDR',
+  sdr: 'SDR',
+  tower: 'Tower Dump',
+  ild: 'ILD',
+};
+
+const EMPTY_FILE_ACTION_STATE = {
+  uploadingTab: null as FileTabKey | null,
+  deletingFileId: null as number | null,
+};
+
+const normalizeFileType = (file: any): FileTabKey | null => {
+  const rawType = `${file?.detected_type || file?.expected_type || file?.file_type || ''}`.trim().toLowerCase();
+  if (!rawType) return null;
+  if (DATA_TYPE_FILE_ALIASES.tower.includes(rawType)) return 'tower';
+  if (FILE_TAB_ORDER.includes(rawType as FileTabKey)) return rawType as FileTabKey;
+  return null;
+};
+
+const getDefaultFileTab = (files: any[]): FileTabKey => {
+  const counts = FILE_TAB_ORDER.reduce<Record<FileTabKey, number>>((acc, key) => {
+    acc[key] = 0;
+    return acc;
+  }, { cdr: 0, ipdr: 0, sdr: 0, tower: 0, ild: 0 });
+
+  files.forEach((file) => {
+    const normalized = normalizeFileType(file);
+    if (normalized) counts[normalized] += 1;
+  });
+
+  return FILE_TAB_ORDER.find((key) => counts[key] > 0) || 'cdr';
+};
+
 export default function CaseView() {
   const { id, dataType } = useParams();
   const navigate = useNavigate();
@@ -75,11 +116,20 @@ export default function CaseView() {
   const [files, setFiles] = useState<any[]>([]);
   const [recordCounts, setRecordCounts] = useState<Record<string, number>>({});
   const [activeTab, setActiveTab] = useState('overview');
+  const [selectedFileTab, setSelectedFileTab] = useState<FileTabKey | null>(null);
   const [loading, setLoading] = useState(true);
-  const [subView, setSubView] = useState<'upload' | 'analysis'>('analysis');
   const [timeline, setTimeline] = useState<TimelineEvent[]>([]);
   const [timelineLoading, setTimelineLoading] = useState(false);
+  const [{ uploadingTab, deletingFileId }, setFileActionState] = useState(EMPTY_FILE_ACTION_STATE);
+  const [fileActionMessage, setFileActionMessage] = useState('');
   const setActiveCase = useCaseContextStore((state) => state.setActiveCase);
+  const fileInputRefs = useRef<Record<FileTabKey, HTMLInputElement | null>>({
+    cdr: null,
+    ipdr: null,
+    sdr: null,
+    tower: null,
+    ild: null,
+  });
 
   useEffect(() => {
     void loadCase();
@@ -170,6 +220,10 @@ export default function CaseView() {
     setRecordCounts(counts);
   };
 
+  const refreshCaseWorkspace = async () => {
+    await Promise.all([loadCase(), loadFiles(), loadRecordCounts()]);
+  };
+
   const getPriorityClass = (p: string) => {
     const map: Record<string, string> = { critical: 'priority-critical', high: 'priority-high', medium: 'priority-medium', low: 'priority-low' };
     return map[p] || '';
@@ -180,42 +234,112 @@ export default function CaseView() {
     return map[s] || '';
   };
 
-  /** Render the selected data type's upload or analysis component */
+  const getModuleFileCount = (moduleKey: string) => {
+    const aliases = DATA_TYPE_FILE_ALIASES[moduleKey] || [moduleKey];
+    return files.filter((file) => {
+      const rawType = `${file?.detected_type || file?.expected_type || file?.file_type || ''}`.trim().toLowerCase();
+      return aliases.includes(rawType);
+    }).length;
+  };
+
+  const filesByType = useMemo(() => {
+    return FILE_TAB_ORDER.reduce<Record<FileTabKey, any[]>>((acc, key) => {
+      acc[key] = files.filter((file) => normalizeFileType(file) === key);
+      return acc;
+    }, { cdr: [], ipdr: [], sdr: [], tower: [], ild: [] });
+  }, [files]);
+
+  useEffect(() => {
+    if (selectedFileTab) return;
+    if (loading) return;
+    setSelectedFileTab(getDefaultFileTab(files));
+  }, [files, loading, selectedFileTab]);
+
+  const activeFiles = selectedFileTab ? filesByType[selectedFileTab] : [];
+
+  const handleUploadIntoFileTab = async (tabKey: FileTabKey, selectedFiles: FileList | null) => {
+    if (!caseData || !selectedFiles || selectedFiles.length === 0) return;
+
+    const incomingFiles = Array.from(selectedFiles);
+    setFileActionState({ uploadingTab: tabKey, deletingFileId: null });
+    setFileActionMessage(`Preparing ${incomingFiles.length} ${FILE_TAB_LABELS[tabKey]} file${incomingFiles.length > 1 ? 's' : ''}...`);
+
+    try {
+      const failures = await ingestCaseUploads({
+        caseId: caseData.id,
+        operator: caseData.operator || '',
+        uploads: [
+          {
+            key: tabKey as CaseUploadSlotKey,
+            label: FILE_TAB_LABELS[tabKey],
+            files: incomingFiles,
+          },
+        ],
+        onProgress: (_slotKey, message) => {
+          setFileActionMessage(message);
+        },
+      });
+
+      await refreshCaseWorkspace();
+      setSelectedFileTab(tabKey);
+
+      if (failures.length > 0) {
+        failures.forEach((failure) => toast.error(failure.message));
+        toast.warning(`${failures.length} ${FILE_TAB_LABELS[tabKey]} upload issue${failures.length > 1 ? 's' : ''} need review.`);
+        setFileActionMessage(`Completed with ${failures.length} upload issue${failures.length > 1 ? 's' : ''}.`);
+      } else {
+        toast.success(`${incomingFiles.length} ${FILE_TAB_LABELS[tabKey]} file${incomingFiles.length > 1 ? 's' : ''} uploaded successfully.`);
+        setFileActionMessage(`${incomingFiles.length} ${FILE_TAB_LABELS[tabKey]} file${incomingFiles.length > 1 ? 's were' : ' was'} uploaded and ingested successfully.`);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to upload files';
+      setFileActionMessage(message);
+      toast.error(message);
+    } finally {
+      setFileActionState(EMPTY_FILE_ACTION_STATE);
+    }
+  };
+
+  const handleDeleteFile = async (file: any) => {
+    if (!caseData) return;
+
+    const confirmed = window.confirm(
+      `Delete ${file.original_name || file.file_name} and all linked analysis records from this case?`
+    );
+
+    if (!confirmed) return;
+
+    setFileActionState({ uploadingTab: null, deletingFileId: Number(file.id) });
+    setFileActionMessage(`Deleting ${file.original_name || file.file_name}...`);
+
+    try {
+      const result = await fileAPI.remove(file.id);
+      await refreshCaseWorkspace();
+      setFileActionMessage(`${file.original_name || file.file_name} was removed from the case.`);
+      toast.success(
+        `Removed ${file.original_name || file.file_name} and ${Number(result.deletedRecords || 0).toLocaleString()} linked record${Number(result.deletedRecords || 0) === 1 ? '' : 's'}.`
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to delete file';
+      setFileActionMessage(message);
+      toast.error(message);
+    } finally {
+      setFileActionState(EMPTY_FILE_ACTION_STATE);
+    }
+  };
+
+  /** Render the selected data type's analysis component */
   const renderDataTypeView = () => {
     if (!dataType || !caseData) return null;
 
     const caseId = String(caseData.id);
     const caseName = caseData.case_name;
     const operator = caseData.operator || '';
+    const moduleFileCount = getModuleFileCount(dataType);
     const onBack = () => navigate(`/case/${id}`);
-
-    const handleUploadSuccess = () => {
-      setSubView('analysis');
-      loadRecordCounts();
-      loadFiles();
-    };
 
     return (
       <div className="data-type-view">
-        {/* Sub-navigation: Upload | Analysis */}
-        <div className="data-type-subnav">
-          <button className="btn-back" onClick={onBack}>← Back to Case</button>
-          <div className="subnav-tabs">
-            <button
-              className={`subnav-tab ${subView === 'upload' ? 'active' : ''}`}
-              onClick={() => setSubView('upload')}
-            >
-              📤 Upload
-            </button>
-            <button
-              className={`subnav-tab ${subView === 'analysis' ? 'active' : ''}`}
-              onClick={() => setSubView('analysis')}
-            >
-              📊 Analysis
-            </button>
-          </div>
-        </div>
-
         <Suspense
           fallback={
             <div className="mx-auto max-w-3xl rounded-3xl border border-slate-200 bg-white/90 p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900/80">
@@ -223,7 +347,7 @@ export default function CaseView() {
                 SHAKTI SAHAYATA
               </div>
               <h3 className="mt-3 text-2xl font-black text-slate-900 dark:text-white">
-                Loading {dataType.toUpperCase()} {subView}
+                Loading {dataType.toUpperCase()} analysis
               </h3>
               <p className="mt-2 text-sm text-slate-600 dark:text-slate-400">
                 Preparing charts, records, and analysis widgets for this case module.
@@ -244,34 +368,23 @@ export default function CaseView() {
             </div>
           }
         >
-          {subView === 'upload' && (
-            <>
-              {dataType === 'cdr' && <CDRUpload caseId={caseId} caseName={caseName} caseOperator={operator} onUploadSuccess={handleUploadSuccess} />}
-              {dataType === 'ipdr' && <IPDRUpload caseId={caseId} caseName={caseName} caseOperator={operator} onUploadSuccess={handleUploadSuccess} />}
-              {dataType === 'sdr' && <SDRUpload caseId={caseId} />}
-              {dataType === 'tower' && <TowerDumpUpload caseId={caseId} caseName={caseName} caseOperator={operator} onUploadSuccess={handleUploadSuccess} />}
-              {dataType === 'ild' && <ILDUpload caseId={caseId} caseName={caseName} caseOperator={operator} onUploadSuccess={handleUploadSuccess} />}
-            </>
-          )}
-          {subView === 'analysis' && (
-            <>
-              {dataType === 'cdr' && (
-                <CDRAdvancedAnalysis caseId={caseId} caseName={caseName} operator={operator} onBack={onBack} />
-              )}
-              {dataType === 'ipdr' && (
-                <IPDRAnalytics caseId={caseId} caseName={caseName} operator={operator} parsedData={[]} fileCount={0} onBack={onBack} />
-              )}
-              {dataType === 'sdr' && (
-                <SDRSearch caseId={caseId} />
-              )}
-              {dataType === 'tower' && (
-                <TowerDumpAnalysis caseId={caseId} caseName={caseName} operator={operator} fileCount={0} onBack={onBack} />
-              )}
-              {dataType === 'ild' && (
-                <ILDAnalysis caseId={caseId} caseName={caseName} operator={operator} onBack={onBack} />
-              )}
-            </>
-          )}
+          <>
+            {dataType === 'cdr' && (
+              <CDRAdvancedAnalysis caseId={caseId} caseName={caseName} operator={operator} fileCount={moduleFileCount} onBack={onBack} />
+            )}
+            {dataType === 'ipdr' && (
+              <IPDRAnalytics caseId={caseId} caseName={caseName} operator={operator} parsedData={[]} fileCount={moduleFileCount} onBack={onBack} />
+            )}
+            {dataType === 'sdr' && (
+              <SDRSearch caseId={caseId} />
+            )}
+            {dataType === 'tower' && (
+              <TowerDumpAnalysis caseId={caseId} caseName={caseName} operator={operator} fileCount={moduleFileCount} onBack={onBack} />
+            )}
+            {dataType === 'ild' && (
+              <ILDAnalysis caseId={caseId} caseName={caseName} operator={operator} fileCount={moduleFileCount} onBack={onBack} />
+            )}
+          </>
         </Suspense>
       </div>
     );
@@ -399,41 +512,145 @@ export default function CaseView() {
       <Card className="rounded-[1.75rem] border-border/70 bg-white/50 shadow-xl dark:bg-slate-900/50">
         <CardContent className="p-6 sm:p-8">
           <div className="case-files">
-            {files.length === 0 ? (
-              <p className="no-data text-slate-500">No files uploaded yet. Use the Data & Analysis tab to upload files.</p>
-            ) : (
-              <div className="case-section">
-                <h3 className="mb-4 text-xl font-bold">Upload Review</h3>
-                <div className="overflow-x-auto">
-                  <table className="files-table w-full border-collapse text-left">
-                    <thead>
-                      <tr className="border-b border-slate-200 dark:border-slate-800">
-                        <th className="p-3">File Name</th>
-                        <th className="p-3">Declared Type</th>
-                        <th className="p-3">Detected Type</th>
-                        <th className="p-3">Confidence</th>
-                        <th className="p-3">Status</th>
-                        <th className="p-3">Accepted / Rejected</th>
-                        <th className="p-3">Uploaded</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {files.map((f: any) => (
-                        <tr key={f.id} className="border-b border-slate-100 dark:border-slate-800/50">
-                          <td className="p-3 font-medium">{f.original_name || f.file_name}</td>
-                          <td className="p-3"><span className="badge rounded bg-slate-100 px-2 py-1 text-xs dark:bg-slate-800">{f.file_type || 'Unknown'}</span></td>
-                          <td className="p-3 text-slate-600 dark:text-slate-400">{f.detected_type || '-'}</td>
-                          <td className="p-3">{typeof f.confidence === 'number' ? `${Math.round(f.confidence * 100)}%` : '-'}</td>
-                          <td className="p-3"><span className={`badge status-${f.parse_status}`}>{f.classification_result || f.parse_status}</span></td>
-                          <td className="p-3 text-slate-600 dark:text-slate-400">{`${f.rows_accepted || 0} / ${f.rows_rejected || 0}`}</td>
-                          <td className="p-3 text-sm text-slate-500">{new Date(f.uploaded_at).toLocaleDateString()}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+            <div className="case-section space-y-6">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                <div>
+                  <h3 className="text-xl font-bold">Case Files</h3>
+                  <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                    Review telecom uploads by type, add new evidence files, or remove files from this workspace.
+                  </p>
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600 shadow-sm dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-300">
+                  {caseData.is_evidence_locked
+                    ? 'Evidence lock is active, so uploads and deletions are disabled.'
+                    : 'Uploads here ingest immediately and refresh analysis counts for the selected telecom tab.'}
                 </div>
               </div>
-            )}
+
+              <div className="flex flex-wrap gap-3 rounded-[1.5rem] border border-border/70 bg-card/70 p-3">
+                {FILE_TAB_ORDER.map((tabKey) => (
+                  <button
+                    key={tabKey}
+                    type="button"
+                    onClick={() => setSelectedFileTab(tabKey)}
+                    className={cn(
+                      'rounded-2xl px-5 py-3 text-sm font-semibold transition-all',
+                      selectedFileTab === tabKey
+                        ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-800 dark:text-white'
+                        : 'text-slate-500 hover:-translate-y-0.5 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'
+                    )}
+                  >
+                    {FILE_TAB_LABELS[tabKey]} ({filesByType[tabKey].length})
+                  </button>
+                ))}
+              </div>
+
+              <div className="rounded-[1.5rem] border border-slate-200 bg-white/80 p-5 shadow-sm dark:border-slate-800 dark:bg-slate-950/50">
+                <div className="flex flex-col gap-4 border-b border-slate-200 pb-5 dark:border-slate-800 md:flex-row md:items-center md:justify-between">
+                  <div>
+                    <h4 className="text-lg font-semibold text-slate-900 dark:text-white">
+                      {selectedFileTab ? FILE_TAB_LABELS[selectedFileTab] : 'Files'}
+                    </h4>
+                    <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                      {activeFiles.length > 0
+                        ? `${activeFiles.length} file${activeFiles.length === 1 ? '' : 's'} linked to this telecom module.`
+                        : `No ${selectedFileTab ? FILE_TAB_LABELS[selectedFileTab] : 'selected'} files have been added to this case yet.`}
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => selectedFileTab && fileInputRefs.current[selectedFileTab]?.click()}
+                      disabled={!selectedFileTab || !!uploadingTab || !!deletingFileId || caseData.is_evidence_locked}
+                      className="rounded-2xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-600 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-200 dark:disabled:bg-slate-800 dark:disabled:text-slate-500"
+                    >
+                      {uploadingTab && selectedFileTab === uploadingTab ? 'Uploading...' : `Upload ${selectedFileTab ? FILE_TAB_LABELS[selectedFileTab] : ''}`}
+                    </button>
+                    {FILE_TAB_ORDER.map((tabKey) => (
+                      <input
+                        key={tabKey}
+                        ref={(element) => {
+                          fileInputRefs.current[tabKey] = element;
+                        }}
+                        type="file"
+                        accept=".csv,.xlsx,.xls"
+                        multiple
+                        className="hidden"
+                        onChange={(event) => {
+                          void handleUploadIntoFileTab(tabKey, event.target.files);
+                          event.target.value = '';
+                        }}
+                      />
+                    ))}
+                  </div>
+                </div>
+
+                {fileActionMessage ? (
+                  <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600 dark:border-slate-800 dark:bg-slate-900/70 dark:text-slate-300">
+                    {fileActionMessage}
+                  </div>
+                ) : null}
+
+                {activeFiles.length === 0 ? (
+                  <div className="rounded-2xl border border-dashed border-slate-300 px-6 py-10 text-center text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400">
+                    <p className="font-medium text-slate-700 dark:text-slate-200">
+                      No {selectedFileTab ? FILE_TAB_LABELS[selectedFileTab] : 'selected'} files are available for this case yet.
+                    </p>
+                    <p className="mt-2">
+                      Add one or more files from this tab to ingest them directly into the case workspace.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="mt-5 overflow-x-auto">
+                    <table className="files-table w-full border-collapse text-left">
+                      <thead>
+                        <tr className="border-b border-slate-200 dark:border-slate-800">
+                          <th className="p-3">File Name</th>
+                          <th className="p-3">Declared Type</th>
+                          <th className="p-3">Detected Type</th>
+                          <th className="p-3">Status</th>
+                          <th className="p-3">Accepted / Rejected</th>
+                          <th className="p-3">Records</th>
+                          <th className="p-3">Uploaded</th>
+                          <th className="p-3 text-right">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {activeFiles.map((file: any) => (
+                          <tr key={file.id} className="border-b border-slate-100 dark:border-slate-800/50">
+                            <td className="p-3 font-medium">{file.original_name || file.file_name}</td>
+                            <td className="p-3">
+                              <span className="rounded bg-slate-100 px-2 py-1 text-xs dark:bg-slate-800">
+                                {file.file_type || 'Unknown'}
+                              </span>
+                            </td>
+                            <td className="p-3 text-slate-600 dark:text-slate-400">{file.detected_type || '-'}</td>
+                            <td className="p-3">
+                              <span className={`badge status-${file.parse_status}`}>{file.classification_result || file.parse_status || 'pending'}</span>
+                            </td>
+                            <td className="p-3 text-slate-600 dark:text-slate-400">{`${file.rows_accepted || 0} / ${file.rows_rejected || 0}`}</td>
+                            <td className="p-3 text-slate-600 dark:text-slate-400">{Number(file.record_count || 0) > 0 ? Number(file.record_count).toLocaleString() : '-'}</td>
+                            <td className="p-3 text-sm text-slate-500">{new Date(file.uploaded_at).toLocaleDateString()}</td>
+                            <td className="p-3">
+                              <div className="flex justify-end">
+                                <button
+                                  type="button"
+                                  onClick={() => void handleDeleteFile(file)}
+                                  disabled={deletingFileId === Number(file.id) || !!uploadingTab || caseData.is_evidence_locked}
+                                  className="rounded-xl border border-red-200 px-3 py-2 text-sm font-semibold text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:border-slate-200 disabled:text-slate-400 dark:border-red-900/70 dark:text-red-300 dark:hover:bg-red-950/30 dark:disabled:border-slate-700 dark:disabled:text-slate-600"
+                                >
+                                  {deletingFileId === Number(file.id) ? 'Deleting...' : 'Delete'}
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
         </CardContent>
       </Card>

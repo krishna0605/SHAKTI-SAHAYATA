@@ -5,7 +5,7 @@ import cookieParser from 'cookie-parser';
 import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { rateLimit } from './middleware/rateLimit.js';
+import { authRateLimit, rateLimit } from './middleware/rateLimit.js';
 import { auditLogger } from './middleware/auditLogger.js';
 import { globalErrorHandler } from './middleware/errorHandler.js';
 import { getLiveHealth, getReadyHealth, getStartupStatus } from './services/runtimeStatus.service.js';
@@ -56,7 +56,6 @@ export const createApp = () => {
   app.use(express.json({ limit: '50mb' }));
   app.use(express.urlencoded({ extended: true, limit: '50mb' }));
   app.use(cookieParser());
-  app.use(rateLimit);
   app.use(auditLogger);
   app.use('/uploads', express.static(uploadDir));
 
@@ -82,21 +81,23 @@ export const createApp = () => {
     res.status(httpStatus).json(startup);
   });
 
+  app.use('/api/auth/login', authRateLimit);
+  app.use('/api/auth/signup', authRateLimit);
   app.use('/api/auth', authRoutes);
-  app.use('/api/cases', casesRoutes);
-  app.use('/api/files', filesRoutes);
-  app.use('/api/dashboard', dashboardRoutes);
-  app.use('/api/cdr', cdrRoutes);
-  app.use('/api/ipdr', ipdrRoutes);
-  app.use('/api/sdr', sdrRoutes);
-  app.use('/api/tower', towerRoutes);
-  app.use('/api/ild', ildRoutes);
-  app.use('/api/audit', auditRoutes);
-  app.use('/api/settings', settingsRoutes);
-  app.use('/api/officers', officerRoutes);
+  app.use('/api/cases', rateLimit, casesRoutes);
+  app.use('/api/files', rateLimit, filesRoutes);
+  app.use('/api/dashboard', rateLimit, dashboardRoutes);
+  app.use('/api/cdr', rateLimit, cdrRoutes);
+  app.use('/api/ipdr', rateLimit, ipdrRoutes);
+  app.use('/api/sdr', rateLimit, sdrRoutes);
+  app.use('/api/tower', rateLimit, towerRoutes);
+  app.use('/api/ild', rateLimit, ildRoutes);
+  app.use('/api/audit', rateLimit, auditRoutes);
+  app.use('/api/settings', rateLimit, settingsRoutes);
+  app.use('/api/officers', rateLimit, officerRoutes);
   app.use('/api/chatbot', chatbotRoutes);
-  app.use('/api/osint', osintRoutes);
-  app.use('/api/system', systemRoutes);
+  app.use('/api/osint', rateLimit, osintRoutes);
+  app.use('/api/system', rateLimit, systemRoutes);
   app.post('/api/reset-settings', (_req, res) => {
     res.json({ success: true, message: 'Legacy reset endpoint is available. No destructive reset was performed.' });
   });
@@ -109,4 +110,3 @@ export const createApp = () => {
 
   return app;
 };
-

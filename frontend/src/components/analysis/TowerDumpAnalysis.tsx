@@ -1,7 +1,6 @@
 import React, { startTransition, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import type { NormalizedTowerDump } from '../utils/towerDumpNormalization';
-import { parseTowerDumpCsvAsync } from '../utils/towerDumpParserAsync';
-import { towerDumpAPI, towerDumpFileAPI } from '../lib/apis';
+import { towerDumpAPI } from '../lib/apis';
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { TowerMap } from './TowerMap';
 import { TowerGraph } from './TowerGraph';
@@ -64,13 +63,6 @@ interface PartyGraphEdge {
 }
 type PartyGraphNodeUpdate = Pick<PartyGraphNode, 'id'> & Partial<PartyGraphNode>;
 type PartyGraphEdgeUpdate = Pick<PartyGraphEdge, 'id'> & Partial<PartyGraphEdge>;
-type UploadTowerDumpRow = NormalizedTowerDump & {
-  source_file?: string;
-  _source_file?: string;
-  row_index?: number;
-  _row_index?: number;
-  file_index?: number;
-};
 
 interface PartyNetworkGraphProps {
   caseId?: string;
@@ -94,17 +86,6 @@ const PARTY_EDGE_PATH_COLOR = '#f97316';
 const MAX_PATH_HIGHLIGHT_NODES = 1200;
 const MAX_PATH_HIGHLIGHT_EDGES = 1800;
 const yieldToUI = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
-const readTabularFileAsCsv = async (file: File): Promise<string> => {
-  const lowerName = file.name.toLowerCase();
-  if (lowerName.endsWith('.xlsx') || lowerName.endsWith('.xls')) {
-    const buffer = await file.arrayBuffer();
-    const workbook = XLSX.read(buffer, { type: 'array' });
-    const firstSheetName = workbook.SheetNames[0];
-    if (!firstSheetName) return '';
-    return XLSX.utils.sheet_to_csv(workbook.Sheets[firstSheetName]);
-  }
-  return file.text();
-};
 
 const normalizeNumber = (value?: string | number | null) => {
   if (value === null || value === undefined) return '';
@@ -952,11 +933,8 @@ export const TowerDumpAnalysis: React.FC<TowerDumpAnalysisProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
   const deferredSearchTerm = useDeferredValue(searchTerm);
   const [currentTime, setCurrentTime] = useState(new Date());
-  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
-  const [uploadStatus, setUploadStatus] = useState<'idle' | 'uploading' | 'success' | 'error'>('idle');
-  const [fileCountState, setFileCountState] = useState(fileCount);
+  const fileCountState = fileCount;
   const [isExporting, setIsExporting] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
@@ -1050,65 +1028,6 @@ export const TowerDumpAnalysis: React.FC<TowerDumpAnalysisProps> = ({
       fetchData();
     }
   }, [caseId, fetchData, initialData]);
-
-  const handleAddFilesClick = () => {
-    fileInputRef.current?.click();
-  };
-
-  const handleAddFilesSelected = (files: FileList | null) => {
-    if (!files || files.length === 0) return;
-    const list = Array.from(files);
-    setSelectedFiles(prev => [...prev, ...list]);
-    if (fileInputRef.current) fileInputRef.current.value = '';
-  };
-
-  const handleUploadFilesToCase = async () => {
-    if (!caseId || !operator || selectedFiles.length === 0) return;
-    try {
-      setUploadStatus('uploading');
-      let allParsed: UploadTowerDumpRow[] = [];
-      for (let i = 0; i < selectedFiles.length; i++) {
-        const file = selectedFiles[i];
-        await yieldToUI();
-        const content = await readTabularFileAsCsv(file);
-        const parsed = await parseTowerDumpCsvAsync(content, operator === 'AUTO' ? undefined : operator);
-        const fileIndex = fileCountState + i;
-        const chunkSize = 2000;
-        const normalized: UploadTowerDumpRow[] = [];
-        for (let start = 0; start < parsed.length; start += chunkSize) {
-          const chunk = parsed.slice(start, start + chunkSize);
-          for (let j = 0; j < chunk.length; j++) {
-            const recordIndex = start + j;
-            const record = chunk[j];
-            normalized.push({
-              ...record,
-              operator: record.operator || operator,
-              source_file: file.name,
-              _source_file: file.name,
-              row_index: recordIndex,
-              _row_index: recordIndex,
-              file_index: fileIndex
-            });
-          }
-          await yieldToUI();
-        }
-        allParsed = allParsed.concat(normalized);
-        await towerDumpFileAPI.upload(caseId, file, operator);
-      }
-      const insertedCount = await towerDumpAPI.insertRecords(caseId, null, allParsed, { chunkSize: 1000 });
-      if (insertedCount <= 0 && allParsed.length > 0) {
-        throw new Error('No tower dump records were inserted into the database.');
-      }
-      await fetchData();
-      setFileCountState(prev => prev + selectedFiles.length);
-      setSelectedFiles([]);
-      setUploadStatus('success');
-    } catch {
-      setUploadStatus('error');
-    } finally {
-      setTimeout(() => setUploadStatus('idle'), 1500);
-    }
-  };
 
   const filteredData = useMemo(() => {
     if (selectedTab !== 'records') return data;
@@ -1958,31 +1877,6 @@ export const TowerDumpAnalysis: React.FC<TowerDumpAnalysisProps> = ({
           </div>
         </div>
         <div className="flex items-center gap-4">
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".csv,.xls,.xlsx"
-            multiple
-            className="hidden"
-            onChange={(e) => handleAddFilesSelected(e.target.files)}
-          />
-          <button
-            onClick={handleAddFilesClick}
-            className="flex items-center gap-2 px-3 py-1 rounded-lg bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-700 transition-colors"
-          >
-            <span className="material-symbols-outlined text-sm">attach_file</span>
-            Add Files
-          </button>
-          {selectedFiles.length > 0 && (
-            <button
-              onClick={handleUploadFilesToCase}
-              className="flex items-center gap-2 px-3 py-1 rounded-lg bg-indigo-600 text-white text-xs font-bold hover:bg-indigo-700 transition-colors disabled:opacity-50"
-              disabled={uploadStatus === 'uploading'}
-            >
-              <span className="material-symbols-outlined text-sm">cloud_upload</span>
-              Upload {selectedFiles.length}
-            </button>
-          )}
           <button onClick={handleExportExcel} disabled={isExporting} className="flex items-center gap-2 px-3 py-1 rounded-lg bg-blue-600 text-white text-xs font-bold hover:bg-blue-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed">
             <span className={`material-symbols-outlined text-sm ${isExporting ? 'animate-spin' : ''}`}>{isExporting ? 'progress_activity' : 'file_download'}</span>
             {isExporting ? 'Exporting...' : 'Export Excel'}
