@@ -5,6 +5,11 @@ import { requireAdminRole } from '../../middleware/admin/authorizeAdmin.js';
 import { getLiveHealth, getReadyHealth, getStartupStatus } from '../../services/runtimeStatus.service.js';
 import { logAdminAction } from '../../services/admin/adminAudit.service.js';
 import {
+  fetchAdminDatabaseRows,
+  fetchAdminDatabaseSchema,
+  fetchAdminDatabaseTable,
+} from '../../services/admin/adminDatabase.service.js';
+import {
   exportAdminCases,
   exportAdminFileDeletions,
   exportAdminFiles,
@@ -657,6 +662,72 @@ router.get('/analysis', async (_req, res) => {
   } catch (error) {
     console.error('[ADMIN] Analysis error:', error);
     res.status(500).json({ error: 'Failed to load admin analysis view' });
+  }
+});
+
+router.get('/database/schema', async (req, res) => {
+  try {
+    const payload = await fetchAdminDatabaseSchema(req.admin.role);
+    await logAdminAction({
+      adminAccountId: req.admin.adminId,
+      sessionId: req.admin.sessionId,
+      action: 'VIEW_DATABASE_SCHEMA',
+      resourceType: 'database_schema',
+      resourceId: null,
+      ipAddress: req.ip,
+      details: { tableCount: payload.summary.tableCount, relationshipCount: payload.summary.relationshipCount },
+    });
+    res.json(payload);
+  } catch (error) {
+    console.error('[ADMIN] Database schema error:', error);
+    res.status(error.statusCode || 500).json({ error: error.message || 'Failed to load database schema' });
+  }
+});
+
+router.get('/database/tables/:table', async (req, res) => {
+  try {
+    const payload = await fetchAdminDatabaseTable(req.params.table, req.admin.role);
+    await logAdminAction({
+      adminAccountId: req.admin.adminId,
+      sessionId: req.admin.sessionId,
+      action: 'VIEW_DATABASE_TABLE',
+      resourceType: 'database_table',
+      resourceId: req.params.table,
+      ipAddress: req.ip,
+      details: {
+        restricted: payload.table.restricted,
+        group: payload.table.group,
+        canBrowseRows: payload.table.canBrowseRows,
+      },
+    });
+    res.json(payload);
+  } catch (error) {
+    console.error('[ADMIN] Database table metadata error:', error);
+    res.status(error.statusCode || 500).json({ error: error.message || 'Failed to load table metadata' });
+  }
+});
+
+router.get('/database/tables/:table/rows', async (req, res) => {
+  try {
+    const payload = await fetchAdminDatabaseRows(req.params.table, req.query, req.admin.role);
+    await logAdminAction({
+      adminAccountId: req.admin.adminId,
+      sessionId: req.admin.sessionId,
+      action: 'BROWSE_DATABASE_ROWS',
+      resourceType: 'database_table',
+      resourceId: req.params.table,
+      ipAddress: req.ip,
+      details: {
+        page: payload.pagination.page,
+        pageSize: payload.pagination.pageSize,
+        sort: payload.sort,
+        filter: payload.filter,
+      },
+    });
+    res.json(payload);
+  } catch (error) {
+    console.error('[ADMIN] Database row browse error:', error);
+    res.status(error.statusCode || 500).json({ error: error.message || 'Failed to browse table rows' });
   }
 });
 

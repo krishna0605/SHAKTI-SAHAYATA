@@ -67,7 +67,7 @@ export default function AdminLayout() {
           </nav>
 
           <div className="mt-8 rounded-2xl border border-dashed border-white/15 bg-white/5 p-4 text-sm text-slate-300">
-            Phase 3 extends the console into governance mode so IT can inspect case ownership, file health, deletions, and linked operational activity in one workflow.
+            Phase 4 adds a read-only database explorer so IT can inspect schema links and masked table samples without shell access or mutation tooling.
           </div>
 
           <Button

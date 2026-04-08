@@ -148,6 +148,142 @@ const queryMock = vi.fn(async (sql, params = []) => {
     };
   }
 
+  if (text.includes('FROM pg_class cls')) {
+    return {
+      rows: [
+        {
+          table_schema: 'public',
+          table_name: 'users',
+          table_type: 'TABLE',
+          estimated_row_count: 12,
+          total_bytes: 16384,
+          last_analyze: '2026-04-08T09:00:00.000Z',
+          last_autoanalyze: '2026-04-08T09:05:00.000Z',
+        },
+        {
+          table_schema: 'public',
+          table_name: 'cases',
+          table_type: 'TABLE',
+          estimated_row_count: 42,
+          total_bytes: 65536,
+          last_analyze: '2026-04-08T08:30:00.000Z',
+          last_autoanalyze: '2026-04-08T08:35:00.000Z',
+        },
+      ],
+      rowCount: 2,
+    };
+  }
+
+  if (text.includes('FROM information_schema.columns c')) {
+    return {
+      rows: [
+        {
+          table_schema: 'public',
+          table_name: 'users',
+          column_name: 'id',
+          ordinal_position: 1,
+          is_nullable: false,
+          data_type: 'integer',
+          udt_name: 'int4',
+          column_default: null,
+          is_primary_key: true,
+        },
+        {
+          table_schema: 'public',
+          table_name: 'users',
+          column_name: 'email',
+          ordinal_position: 2,
+          is_nullable: false,
+          data_type: 'character varying',
+          udt_name: 'varchar',
+          column_default: null,
+          is_primary_key: false,
+        },
+        {
+          table_schema: 'public',
+          table_name: 'users',
+          column_name: 'password_hash',
+          ordinal_position: 3,
+          is_nullable: false,
+          data_type: 'character varying',
+          udt_name: 'varchar',
+          column_default: null,
+          is_primary_key: false,
+        },
+        {
+          table_schema: 'public',
+          table_name: 'cases',
+          column_name: 'id',
+          ordinal_position: 1,
+          is_nullable: false,
+          data_type: 'integer',
+          udt_name: 'int4',
+          column_default: null,
+          is_primary_key: true,
+        },
+        {
+          table_schema: 'public',
+          table_name: 'cases',
+          column_name: 'case_number',
+          ordinal_position: 2,
+          is_nullable: false,
+          data_type: 'character varying',
+          udt_name: 'varchar',
+          column_default: null,
+          is_primary_key: false,
+        },
+      ],
+      rowCount: 5,
+    };
+  }
+
+  if (text.includes('FROM pg_indexes')) {
+    return {
+      rows: [
+        {
+          table_schema: 'public',
+          table_name: 'users',
+          index_name: 'users_pkey',
+          index_definition: 'CREATE UNIQUE INDEX users_pkey ON public.users USING btree (id)',
+        },
+        {
+          table_schema: 'public',
+          table_name: 'cases',
+          index_name: 'cases_pkey',
+          index_definition: 'CREATE UNIQUE INDEX cases_pkey ON public.cases USING btree (id)',
+        },
+      ],
+      rowCount: 2,
+    };
+  }
+
+  if (text.includes("constraint_type = 'FOREIGN KEY'")) {
+    return {
+      rows: [
+        {
+          constraint_name: 'cases_owner_id_fkey',
+          source_schema: 'public',
+          source_table: 'cases',
+          source_column: 'id',
+          target_schema: 'public',
+          target_table: 'users',
+          target_column: 'id',
+        },
+      ],
+      rowCount: 1,
+    };
+  }
+
+  if (text.includes('FROM "public"."cases"')) {
+    return {
+      rows: [
+        { id: 201, case_number: 'CASE-201' },
+        { id: 202, case_number: 'CASE-202' },
+      ],
+      rowCount: 2,
+    };
+  }
+
   if (text.includes('UPDATE refresh_tokens')) {
     return { rows: [], rowCount: 2 };
   }
@@ -309,6 +445,86 @@ describe('admin console endpoints', () => {
     expect(response.body.admins[0].full_name).toBe('IT Admin');
     expect(response.body.summary.activeOfficerSessions).toBe(1);
     expect(response.body.summary.activeAdminSessions).toBe(1);
+  });
+
+  it('returns database schema metadata and records the browse action', async () => {
+    const response = await request(app)
+      .get('/api/admin/database/schema')
+      .set('Authorization', `Bearer ${createAdminToken()}`);
+
+    expect(response.status).toBe(200);
+    expect(response.body.summary.tableCount).toBe(2);
+    expect(response.body.tables).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: 'users', canBrowseRows: true }),
+        expect.objectContaining({ name: 'cases', relationshipCount: 1 }),
+      ])
+    );
+
+    expect(
+      queryMock.mock.calls.some(
+        ([sql, params]) =>
+          String(sql).includes('INSERT INTO admin_action_logs')
+          && params?.includes('VIEW_DATABASE_SCHEMA')
+      )
+    ).toBe(true);
+  });
+
+  it('returns table metadata and records the selected-table browse action', async () => {
+    const response = await request(app)
+      .get('/api/admin/database/tables/users')
+      .set('Authorization', `Bearer ${createAdminToken()}`);
+
+    expect(response.status).toBe(200);
+    expect(response.body.table).toEqual(
+      expect.objectContaining({
+        name: 'users',
+        restricted: true,
+        canBrowseRows: true,
+      })
+    );
+    expect(response.body.columns).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: 'password_hash', maskStrategy: 'full' }),
+      ])
+    );
+
+    expect(
+      queryMock.mock.calls.some(
+        ([sql, params]) =>
+          String(sql).includes('INSERT INTO admin_action_logs')
+          && params?.includes('VIEW_DATABASE_TABLE')
+      )
+    ).toBe(true);
+  });
+
+  it('returns masked row browse data for allowed admin roles', async () => {
+    const response = await request(app)
+      .get('/api/admin/database/tables/cases/rows')
+      .query({ sortBy: 'id', sortDir: 'asc', limit: 25 })
+      .set('Authorization', `Bearer ${createAdminToken('it_admin')}`);
+
+    expect(response.status).toBe(200);
+    expect(response.body.items[0]).toEqual({ id: 201, case_number: 'CASE-201' });
+    expect(response.body.pagination.pageSize).toBe(25);
+    expect(response.body.sort).toEqual({ by: 'id', dir: 'asc' });
+
+    expect(
+      queryMock.mock.calls.some(
+        ([sql, params]) =>
+          String(sql).includes('INSERT INTO admin_action_logs')
+          && params?.includes('BROWSE_DATABASE_ROWS')
+      )
+    ).toBe(true);
+  });
+
+  it('blocks restricted database row browse for auditors', async () => {
+    const response = await request(app)
+      .get('/api/admin/database/tables/users/rows')
+      .set('Authorization', `Bearer ${createAdminToken('it_auditor')}`);
+
+    expect(response.status).toBe(403);
+    expect(response.body.error).toContain('it_admin');
   });
 
   it('forces logout for officer sessions and records the action', async () => {

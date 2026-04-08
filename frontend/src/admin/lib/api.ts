@@ -3,6 +3,8 @@ import { adminApiClient, getAdminAccessToken } from './adminApiClient'
 import type {
   ActivityFeedResponse,
   AdminAnalysisResponse,
+  AdminDatabaseSchemaResponse,
+  AdminDatabaseTableResponse,
   AdminCaseDetailResponse,
   AdminCasesResponse,
   AdminFileDeletionResponse,
@@ -12,6 +14,7 @@ import type {
   AdminSessionInfo,
   AdminSessionsResponse,
   AdminUsersResponse,
+  SafeBrowsePage,
 } from '../types'
 
 export const adminAuthAPI = {
@@ -257,5 +260,31 @@ export const adminConsoleAPI = {
 
   async getAnalysis() {
     return adminApiClient.request<AdminAnalysisResponse>('/analysis')
+  },
+
+  async getDatabaseSchema() {
+    return adminApiClient.request<AdminDatabaseSchemaResponse>('/database/schema')
+  },
+
+  async getDatabaseTable(table: string) {
+    return adminApiClient.request<AdminDatabaseTableResponse>(`/database/tables/${encodeURIComponent(table)}`)
+  },
+
+  async getDatabaseRows(
+    table: string,
+    filters: {
+      page?: number
+      limit?: number
+      sortBy?: string
+      sortDir?: string
+      filterColumn?: string
+      filterOp?: string
+      filterValue?: string
+    } = {}
+  ) {
+    const query = buildSearchParams(filters)
+    return adminApiClient.request<SafeBrowsePage>(
+      `/database/tables/${encodeURIComponent(table)}/rows${query ? `?${query}` : ''}`
+    )
   },
 }

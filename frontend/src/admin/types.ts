@@ -332,3 +332,113 @@ export interface AdminAnalysisResponse {
     total_rows: number
   }>
 }
+
+export interface DatabaseRelationship {
+  constraintName: string
+  sourceTable: string
+  sourceColumn: string
+  targetTable: string
+  targetColumn: string
+}
+
+export interface DatabaseTableMeta {
+  name: string
+  schema: string
+  type: string
+  group: string
+  restricted: boolean
+  estimatedRowCount: number
+  totalBytes: number
+  totalBytesLabel: string
+  lastAnalyzedAt: string | null
+  columnCount: number
+  indexCount: number
+  relationshipCount: number
+  canBrowseRows: boolean
+  browseRestrictionReason: string | null
+  largeTableMode: boolean
+}
+
+export interface DatabaseColumnMeta {
+  name: string
+  ordinalPosition: number
+  dataType: string
+  databaseType: string
+  isNullable: boolean
+  defaultValue: string | null
+  isPrimaryKey: boolean
+  maskStrategy: string
+}
+
+export interface DatabaseIndexMeta {
+  name: string
+  definition: string
+  columns: string[]
+  isUnique: boolean
+}
+
+export interface AdminDatabaseSchemaResponse {
+  generatedAt: string
+  summary: {
+    tableCount: number
+    relationshipCount: number
+    restrictedTableCount: number
+  }
+  groups: Array<{
+    name: string
+    count: number
+  }>
+  tables: DatabaseTableMeta[]
+  relationships: DatabaseRelationship[]
+}
+
+export interface AdminDatabaseTableResponse {
+  table: {
+    name: string
+    schema: string
+    type: string
+    group: string
+    restricted: boolean
+    estimatedRowCount: number
+    totalBytes: number
+    totalBytesLabel: string
+    lastAnalyzedAt: string | null
+    canBrowseRows: boolean
+    browseRestrictionReason: string | null
+    largeTableMode: boolean
+  }
+  columns: DatabaseColumnMeta[]
+  indexes: DatabaseIndexMeta[]
+  outgoingRelationships: DatabaseRelationship[]
+  incomingRelationships: DatabaseRelationship[]
+}
+
+export interface SafeBrowsePage {
+  table: {
+    name: string
+    schema: string
+    restricted: boolean
+    estimatedRowCount: number
+    totalBytesLabel: string
+    canBrowseRows: boolean
+    browseRestrictionReason: string | null
+    largeTableMode: boolean
+  }
+  columns: DatabaseColumnMeta[]
+  items: Array<Record<string, unknown>>
+  pagination: {
+    page: number
+    pageSize: number
+    hasMore: boolean
+    estimatedTotal: number
+  }
+  filter: {
+    column: string | null
+    operator: string | null
+    value: string | null
+  }
+  sort: {
+    by: string
+    dir: string
+  }
+}
