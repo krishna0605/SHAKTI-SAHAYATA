@@ -29,9 +29,22 @@ const buildActivityWhereClause = (query = {}) => {
 
   if (query.source) addClause('source = ?', String(query.source).trim().toLowerCase());
   if (query.actorType) addClause('actor_type = ?', String(query.actorType).trim().toLowerCase());
+  if (query.actor) {
+    const actor = `%${String(query.actor).trim()}%`;
+    params.push(actor);
+    const index = `$${params.length}`;
+    clauses.push(`(
+      COALESCE(actor_name, '') ILIKE ${index}
+      OR COALESCE(actor_email, '') ILIKE ${index}
+      OR COALESCE(actor_id, '') ILIKE ${index}
+    )`);
+  }
   if (query.action) addClause('action = ?', String(query.action).trim());
   if (query.resourceType) addClause('resource_type = ?', String(query.resourceType).trim());
+  if (query.resourceId) addClause('resource_id = ?', String(query.resourceId).trim());
   if (query.caseId) addClause("resource_id = ? AND resource_type = 'case'", String(query.caseId).trim());
+  if (query.sessionId) addClause('session_id = ?', String(query.sessionId).trim());
+  if (query.ipAddress) addClause("COALESCE(ip_address, '') ILIKE ?", `%${String(query.ipAddress).trim()}%`);
   if (query.dateFrom) addClause('created_at >= ?::timestamptz', String(query.dateFrom).trim());
   if (query.dateTo) addClause('created_at <= ?::timestamptz', String(query.dateTo).trim());
   if (query.q) {
@@ -233,10 +246,10 @@ router.get('/overview', async (req, res) => {
         fileDeletionsToday: metrics.file_deletions_today || 0,
         failedOfficerLogins: metrics.failed_officer_logins || 0,
         failedAdminLogins: metrics.failed_admin_logins || 0,
-        recentAdminActions: metrics.recent_admin_actions || 0,
+      recentAdminActions: metrics.recent_admin_actions || 0,
       },
       health: {
-        databaseConnected: true,
+        databaseConnected: ready.checks?.database?.status !== 'fail',
         serverTime: dbHealthResult.rows[0]?.server_time || null,
         live,
         ready,

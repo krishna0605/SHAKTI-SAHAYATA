@@ -67,7 +67,7 @@ export default function AdminLayout() {
           </nav>
 
           <div className="mt-8 rounded-2xl border border-dashed border-white/15 bg-white/5 p-4 text-sm text-slate-300">
-            Phase 1 is focused on secure entry and shell setup. These modules are scaffolded now and will become data-backed in later phases.
+            Phase 2 connects the admin shell to live observability data so IT can monitor activity, users, sessions, and platform health from one place.
           </div>
 
           <Button

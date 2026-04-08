@@ -19,6 +19,8 @@ const SettingsPage = lazy(() => import('./pages/SettingsPage').then((m) => ({ de
 const OSINTTools = lazy(() => import('./components/osint/OSINT').then((m) => ({ default: m.OSINTTools })))
 const AdminLoginPage = lazy(() => import('./admin/pages/AdminLoginPage'))
 const AdminOverviewPage = lazy(() => import('./admin/pages/AdminOverviewPage'))
+const AdminActivityPage = lazy(() => import('./admin/pages/AdminActivityPage'))
+const AdminUsersPage = lazy(() => import('./admin/pages/AdminUsersPage'))
 const AdminPlaceholderPage = lazy(() => import('./admin/pages/AdminPlaceholderPage'))
 
 function RouteLoadingShell({ label }: { label: string }) {
@@ -106,14 +108,8 @@ function App() {
         <Route element={<AdminProtectedRoute />}>
           <Route element={<AdminLayout />}>
             <Route path="/admin" element={<AdminOverviewPage />} />
-            <Route
-              path="/admin/activity"
-              element={<AdminPlaceholderPage title="Activity Feed" description="This module will become the global admin event timeline in phase 2, powered by audit logs, sessions, and live event updates." />}
-            />
-            <Route
-              path="/admin/users"
-              element={<AdminPlaceholderPage title="Users & Sessions" description="This module will become the admin view for officer usage, active sessions, failed logins, and session revocation in phase 2." />}
-            />
+            <Route path="/admin/activity" element={<AdminActivityPage />} />
+            <Route path="/admin/users" element={<AdminUsersPage />} />
             <Route
               path="/admin/cases"
               element={<AdminPlaceholderPage title="Cases" description="This module will become the operational case governance surface with assignments, evidence locks, and activity links in phase 3." />}
