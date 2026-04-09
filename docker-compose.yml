@@ -200,7 +200,7 @@ services:
       - shakti-network
 
   node-exporter:
-    profiles: ["observability"]
+    profiles: ["observability-host"]
     image: prom/node-exporter:v1.8.2
     container_name: shakti-node-exporter
     command:

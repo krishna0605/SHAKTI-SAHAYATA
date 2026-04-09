@@ -15,6 +15,7 @@ const repoRoot = path.resolve(__dirname, '..');
 const runtimeDir = path.join(repoRoot, 'ops', 'runtime');
 const backupStatusPath = path.join(runtimeDir, 'backup-status.json');
 const restoreStatusPath = path.join(runtimeDir, 'restore-status.json');
+const hostMetricsProfile = process.platform === 'linux' ? 'observability-host' : null;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -155,7 +156,8 @@ const main = async () => {
   await ensureHostOllama();
 
   console.log('\n[up] Starting SHAKTI development stack with Docker (host Ollama mode)...\n');
-  await runCommand('docker', [...composeArgs, 'up', '--build', '-d']);
+  const effectiveComposeArgs = hostMetricsProfile ? ['compose', '--profile', 'observability', '--profile', hostMetricsProfile, '-f', 'docker-compose.yml', '-f', 'docker-compose.dev.yml'] : composeArgs;
+  await runCommand('docker', [...effectiveComposeArgs, 'up', '--build', '-d']);
 
   console.log('\n[up] Waiting for backend, GraphQL, Prometheus, and Grafana readiness...\n');
   const backendReady = await waitForBackend();
@@ -186,6 +188,9 @@ const main = async () => {
   console.log(`[up] GraphQL endpoint: ${graphqlReady ? 'ready' : 'not ready yet'}`);
   console.log(`[up] Prometheus: ${prometheusReady ? 'ready' : 'not ready yet'}`);
   console.log(`[up] Grafana: ${grafanaReady ? 'ready' : 'not ready yet'}`);
+  if (!hostMetricsProfile) {
+    console.log('[up] Host node exporter: skipped on this platform; backend and Postgres metrics are still available.');
+  }
 
   const [backupStatus, restoreStatus] = await Promise.all([
     readJson(backupStatusPath),
