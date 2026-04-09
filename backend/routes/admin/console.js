@@ -241,7 +241,7 @@ router.get('/overview', async (req, res) => {
             severity: 'warning',
             title: 'Locked officer accounts',
             description: `${accountState.locked_officer_accounts} officer account(s) are currently locked.`,
-            href: '/admin/users',
+            href: '/users',
             count: accountState.locked_officer_accounts,
           }
         : null,
@@ -251,7 +251,7 @@ router.get('/overview', async (req, res) => {
             severity: 'critical',
             title: 'Locked admin accounts',
             description: `${accountState.locked_admin_accounts} admin account(s) are currently locked.`,
-            href: '/admin/users',
+            href: '/users',
             count: accountState.locked_admin_accounts,
           }
         : null,
@@ -261,7 +261,7 @@ router.get('/overview', async (req, res) => {
             severity: 'warning',
             title: 'Failed ingestion jobs',
             description: `${accountState.failed_ingestion_jobs} ingestion job(s) need review.`,
-            href: '/admin/files',
+            href: '/files',
             count: accountState.failed_ingestion_jobs,
           }
         : null,
@@ -271,7 +271,7 @@ router.get('/overview', async (req, res) => {
             severity: 'critical',
             title: 'Backend readiness degraded',
             description: 'The backend readiness checks are not fully passing.',
-            href: '/admin/system',
+            href: '/system',
             count: 1,
           }
         : null,
@@ -281,7 +281,7 @@ router.get('/overview', async (req, res) => {
             severity: 'warning',
             title: 'Startup checks degraded',
             description: 'Startup self-checks reported degraded or failed components.',
-            href: '/admin/system',
+            href: '/system',
             count: 1,
           }
         : null,

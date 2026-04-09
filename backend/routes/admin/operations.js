@@ -18,6 +18,12 @@ import {
   sendCsv,
 } from '../../services/admin/adminExport.service.js';
 import { exportAdminCases, exportAdminFiles } from '../../services/admin/adminGovernance.service.js';
+import { buildAdminObservatoryPayload } from '../../services/admin/adminObservatory.service.js';
+import {
+  fetchAdminIngestionWorkspace,
+  fetchAdminNormalizationWorkspace,
+  fetchAdminStorageWorkspace,
+} from '../../services/admin/adminOpsWorkspace.service.js';
 import { buildAdminSystemHealthSnapshot, runAdminSystemSelfCheck } from '../../services/admin/adminSystem.service.js';
 
 const router = Router();
@@ -121,6 +127,65 @@ const logStructuredExport = async ({
     },
   });
 };
+
+router.get('/observatory', async (req, res) => {
+  try {
+    const admin = await toAdminSecurityProfile(req.admin.adminId);
+    const payload = await buildAdminObservatoryPayload({
+      admin,
+      networkRequestState: req.adminNetworkRestriction || null,
+    });
+
+    await logAdminAction({
+      adminAccountId: req.admin.adminId,
+      sessionId: req.admin.sessionId,
+      action: 'VIEW_ADMIN_OBSERVATORY',
+      resourceType: 'observatory',
+      resourceId: 'main',
+      ipAddress: req.ip,
+      details: {
+        alertCount: payload.attention.length,
+        activityCount: payload.activity.length,
+        databaseStatus: payload.summary.databaseStatus,
+      },
+    });
+
+    res.json(payload);
+  } catch (error) {
+    console.error('[ADMIN] Observatory error:', error);
+    res.status(500).json({ error: 'Failed to load admin observatory' });
+  }
+});
+
+router.get('/ops/ingestion', requireAdminPermission('console_access'), async (req, res) => {
+  try {
+    const payload = await fetchAdminIngestionWorkspace(req.query);
+    res.json(payload);
+  } catch (error) {
+    console.error('[ADMIN] Ingestion workspace error:', error);
+    res.status(500).json({ error: 'Failed to load ingestion workspace' });
+  }
+});
+
+router.get('/ops/normalization', requireAdminPermission('console_access'), async (req, res) => {
+  try {
+    const payload = await fetchAdminNormalizationWorkspace(req.query);
+    res.json(payload);
+  } catch (error) {
+    console.error('[ADMIN] Normalization workspace error:', error);
+    res.status(500).json({ error: 'Failed to load normalization workspace' });
+  }
+});
+
+router.get('/ops/storage', requireAdminPermission('console_access'), async (req, res) => {
+  try {
+    const payload = await fetchAdminStorageWorkspace(req.query);
+    res.json(payload);
+  } catch (error) {
+    console.error('[ADMIN] Storage workspace error:', error);
+    res.status(500).json({ error: 'Failed to load storage workspace' });
+  }
+});
 
 router.get('/system/health', requireAdminPermission('view_system'), async (req, res) => {
   try {

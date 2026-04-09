@@ -39,6 +39,17 @@ export const resolveUploadDir = () => path.resolve(__dirname, process.env.UPLOAD
 export const createApp = () => {
   const app = express();
   const uploadDir = resolveUploadDir();
+  const allowedOrigins = (process.env.ALLOWED_ORIGINS || 'http://localhost:5173,http://localhost:4174,http://localhost:3000')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const corsOptions = {
+    origin: allowedOrigins,
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+    optionsSuccessStatus: 204,
+  };
 
   if (!fs.existsSync(uploadDir)) {
     fs.mkdirSync(uploadDir, { recursive: true });
@@ -49,14 +60,8 @@ export const createApp = () => {
     contentSecurityPolicy: false,
   }));
 
-  app.use(cors({
-    origin: (process.env.ALLOWED_ORIGINS || 'http://localhost:5173,http://localhost:3000')
-      .split(',')
-      .map((s) => s.trim()),
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
-  }));
+  app.use(cors(corsOptions));
+  app.options('*', cors(corsOptions));
 
   app.use(express.json({ limit: '50mb' }));
   app.use(express.urlencoded({ extended: true, limit: '50mb' }));

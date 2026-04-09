@@ -21,6 +21,7 @@ Default seeded users verified during backend startup:
 - BK-9999 / admin@police.gov.in / Shakti@123
 
 Frontend: http://localhost:5173
+Admin:    http://localhost:4174
 Backend:  http://localhost:3001/api/health
 AI:       optional future service (not started by default)
 Ollama:   ${hostOllamaUrl}

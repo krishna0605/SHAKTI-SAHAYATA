@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { Navigate, Outlet } from 'react-router-dom'
 import { Shield } from 'lucide-react'
 import { useAdminAuthStore } from '../store/adminAuthStore'
+import { adminPaths } from '../lib/paths'
 
 export default function AdminProtectedRoute() {
   const { authStatus, bootstrapAuth } = useAdminAuthStore()
@@ -27,7 +28,7 @@ export default function AdminProtectedRoute() {
   }
 
   if (authStatus !== 'authenticated') {
-    return <Navigate to="/admin/login" replace />
+    return <Navigate to={adminPaths.login} replace />
   }
 
   return <Outlet />

@@ -1,4 +1,5 @@
 import { resolveBackendBaseUrl, ApiError } from '../../lib/apiClient'
+import { adminPaths } from './paths'
 
 let inMemoryAdminAccessToken: string | null = null
 let adminAuthFailureHandler: (() => void) | null = null
@@ -6,8 +7,8 @@ let refreshPromise: Promise<boolean> | null = null
 
 const redirectToAdminLogin = () => {
   if (typeof window === 'undefined') return
-  if (window.location.pathname !== '/admin/login') {
-    window.location.href = '/admin/login'
+  if (window.location.pathname !== adminPaths.login) {
+    window.location.href = adminPaths.login
   }
 }
 

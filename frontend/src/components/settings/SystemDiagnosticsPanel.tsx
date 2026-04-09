@@ -193,16 +193,16 @@ export default function SystemDiagnosticsPanel() {
         </div>
       </div>
 
-        <div className="mt-5 rounded-xl border border-slate-200 bg-slate-50/80 p-4 dark:border-slate-800 dark:bg-card/60">
+      <div className="mt-5 rounded-xl border border-slate-200 bg-slate-50/90 p-4 shadow-sm dark:border-slate-700/80 dark:bg-slate-900/80">
         <div className="flex items-center justify-between gap-3">
-          <h3 className="text-sm font-bold uppercase tracking-[0.18em] text-slate-700 dark:text-slate-300">
+          <h3 className="text-sm font-bold uppercase tracking-[0.18em] text-slate-800 dark:text-slate-100">
             Chatbot Capability
           </h3>
-          <span className="text-xs text-slate-500 dark:text-slate-400">
+          <span className="text-xs font-medium text-slate-500 dark:text-slate-300">
             {diagnostics?.requester?.buckleId || user?.buckleId || 'Unknown requester'}
           </span>
         </div>
-        <p className="mt-2 text-sm text-slate-700 dark:text-slate-300">{chatbotDetail}</p>
+        <p className="mt-2 text-sm leading-relaxed text-slate-700 dark:text-slate-200">{chatbotDetail}</p>
       </div>
 
       <div className="mt-5">

@@ -9,14 +9,18 @@ import type {
   AdminDatabaseTableResponse,
   AdminCaseDetailResponse,
   AdminCasesResponse,
+  AdminObservatoryResponse,
   AdminExportHistoryResponse,
   AdminFileDeletionResponse,
   AdminFilesResponse,
   AdminIdentity,
+  AdminIngestionWorkspaceResponse,
+  AdminNormalizationWorkspaceResponse,
   AdminOverviewResponse,
   AdminSelfCheckResponse,
   AdminSessionInfo,
   AdminSessionsResponse,
+  AdminStorageWorkspaceResponse,
   AdminSystemHealthResponse,
   AdminUsersResponse,
   SafeBrowsePage,
@@ -157,6 +161,10 @@ const downloadAdminCsv = async (
 }
 
 export const adminConsoleAPI = {
+  async getObservatory() {
+    return adminApiClient.request<AdminObservatoryResponse>('/observatory')
+  },
+
   async getSystemHealth() {
     return adminApiClient.request<AdminSystemHealthResponse>('/system/health')
   },
@@ -376,6 +384,41 @@ export const adminConsoleAPI = {
 
   async getAnalysis() {
     return adminApiClient.request<AdminAnalysisResponse>('/analysis')
+  },
+
+  async getIngestionWorkspace(filters: {
+    limit?: number
+    q?: string
+    caseId?: string | number
+    parseStatus?: string
+    fileType?: string
+    failureOnly?: boolean
+    pendingOnly?: boolean
+  } = {}) {
+    const query = buildSearchParams(filters)
+    return adminApiClient.request<AdminIngestionWorkspaceResponse>(`/ops/ingestion${query ? `?${query}` : ''}`)
+  },
+
+  async getNormalizationWorkspace(filters: {
+    limit?: number
+    q?: string
+    caseId?: string | number
+    status?: string
+    focusJobId?: string
+  } = {}) {
+    const query = buildSearchParams(filters)
+    return adminApiClient.request<AdminNormalizationWorkspaceResponse>(`/ops/normalization${query ? `?${query}` : ''}`)
+  },
+
+  async getStorageWorkspace(filters: {
+    limit?: number
+    q?: string
+    caseId?: string | number
+    fileType?: string
+    uploader?: string
+  } = {}) {
+    const query = buildSearchParams(filters)
+    return adminApiClient.request<AdminStorageWorkspaceResponse>(`/ops/storage${query ? `?${query}` : ''}`)
   },
 
   async getDatabaseSchema() {

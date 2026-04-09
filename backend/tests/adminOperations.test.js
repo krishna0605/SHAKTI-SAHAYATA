@@ -12,6 +12,117 @@ const queryMock = vi.fn(async (sql, params = []) => {
     };
   }
 
+  if (text.includes('active_officers') && text.includes('active_admins') && text.includes('failed_ingestion_jobs')) {
+    return {
+      rows: [
+        {
+          active_officer_sessions: 3,
+          active_admin_sessions: 1,
+          active_officers: 2,
+          active_admins: 1,
+          open_cases: 14,
+          uploads_today: 7,
+          file_deletions_today: 1,
+          failed_ingestion_jobs: 2,
+        },
+      ],
+      rowCount: 1,
+    };
+  }
+
+  if (text.includes('officers_online') && text.includes('stale_session_count')) {
+    return {
+      rows: [{ officers_online: 2, admins_online: 1, stale_session_count: 1 }],
+      rowCount: 1,
+    };
+  }
+
+  if (text.includes("'officer'::text AS session_type") && text.includes('LIMIT 8')) {
+    return {
+      rows: [
+        {
+          id: 'sess-user-1',
+          session_type: 'officer',
+          actor_name: 'Officer One',
+          actor_email: 'officer1@police.gov.in',
+          actor_role: 'officer',
+          actor_badge: 'B-101',
+          started_at: '2026-04-08T11:00:00.000Z',
+          ended_at: null,
+          ip_address: '127.0.0.1',
+          user_agent: 'Mozilla/5.0',
+          session_age_seconds: 3600,
+        },
+        {
+          id: 'sess-admin-1',
+          session_type: 'admin',
+          actor_name: 'IT Admin',
+          actor_email: 'it.admin@police.gov.in',
+          actor_role: 'it_admin',
+          actor_badge: null,
+          started_at: '2026-04-08T10:30:00.000Z',
+          ended_at: null,
+          ip_address: '127.0.0.1',
+          user_agent: 'Mozilla/5.0',
+          session_age_seconds: 5400,
+        },
+      ],
+      rowCount: 2,
+    };
+  }
+
+  if (text.includes('COUNT(*) FILTER (WHERE is_evidence_locked = TRUE)::int AS locked_cases')) {
+    return {
+      rows: [{ total_cases: 14, locked_cases: 2, high_priority_cases: 4 }],
+      rowCount: 1,
+    };
+  }
+
+  if (text.includes('FROM cases c') && text.includes('ORDER BY c.updated_at DESC') && text.includes('owner_user')) {
+    return {
+      rows: [
+        {
+          id: 41,
+          case_name: 'Alpha Case',
+          case_number: 'CASE-41',
+          status: 'open',
+          priority: 'high',
+          is_evidence_locked: true,
+          updated_at: '2026-04-08T11:20:00.000Z',
+          owner_name: 'Officer One',
+          owner_buckle_id: 'B-101',
+        },
+      ],
+      rowCount: 1,
+    };
+  }
+
+  if (text.includes('(SELECT COUNT(*)::int FROM uploaded_files) AS total_files') && text.includes('processing_jobs')) {
+    return {
+      rows: [{ total_files: 31, failed_parse_files: 3, total_deletions: 1, processing_jobs: 2, failed_ingestion_jobs: 2 }],
+      rowCount: 1,
+    };
+  }
+
+  if (text.includes('FROM uploaded_files uf') && text.includes('ORDER BY uf.uploaded_at DESC')) {
+    return {
+      rows: [
+        {
+          id: 5001,
+          original_name: 'tower-dump.csv',
+          file_name: 'tower-dump-5001.csv',
+          parse_status: 'processing',
+          uploaded_at: '2026-04-08T11:10:00.000Z',
+          case_id: 41,
+          case_name: 'Alpha Case',
+          case_number: 'CASE-41',
+          telecom_module: 'cdr',
+        },
+      ],
+      rowCount: 1,
+    };
+  }
+
   if (text.includes('SELECT NOW() AS server_time') && text.includes('total_cases')) {
     return {
       rows: [{ total_cases: 14, total_files: 31, failed_ingestion_jobs: 2, active_admin_sessions: 1 }],
@@ -64,6 +175,37 @@ const queryMock = vi.fn(async (sql, params = []) => {
   if (text.includes("WHERE action = 'RUN_SYSTEM_SELF_CHECK'") && text.includes('LIMIT 1')) {
     return {
       rows: [{ details: { status: 'fail', failedChecks: ['database'], degradedChecks: [] }, created_at: '2026-04-08T11:45:00.000Z' }],
+      rowCount: 1,
+    };
+  }
+
+  if (text.includes('FROM unified_activity') && text.includes('ORDER BY created_at DESC, source ASC, id DESC') && text.includes('LIMIT $1 OFFSET $2')) {
+    return {
+      rows: [
+        {
+          source: 'audit',
+          id: '901',
+          created_at: '2026-04-08T11:59:00.000Z',
+          actor_type: 'officer',
+          actor_id: '7',
+          actor_name: 'Officer One',
+          actor_email: 'officer1@police.gov.in',
+          actor_role: 'officer',
+          action: 'CASE_OPENED',
+          resource_type: 'case',
+          resource_id: '41',
+          session_id: 'sess-user-1',
+          ip_address: '127.0.0.1',
+          details: { caseId: '41' },
+        },
+      ],
+      rowCount: 1,
+    };
+  }
+
+  if (text.includes('FROM unified_activity') && text.includes('SELECT COUNT(*)::int AS total')) {
+    return {
+      rows: [{ total: 1 }],
       rowCount: 1,
     };
   }
@@ -270,6 +412,26 @@ describe('admin system operations', () => {
         expect.objectContaining({ id: 'failed-logins' }),
       ])
     );
+  });
+
+  it('returns the simplified observatory payload with monitoring sections', async () => {
+    const response = await request(app)
+      .get('/api/admin/observatory')
+      .set('Authorization', `Bearer ${createAdminToken()}`);
+
+    expect(response.status).toBe(200);
+    expect(response.body.summary.activeOfficers).toBe(2);
+    expect(response.body.monitoring.backend.label).toBe('Backend');
+    expect(response.body.monitoring.pipeline.label).toBe('Pipeline');
+    expect(response.body.attention).toEqual(expect.any(Array));
+    expect(response.body.activity).toEqual(
+      expect.arrayContaining([expect.objectContaining({ action: 'CASE_OPENED' })])
+    );
+    expect(
+      queryMock.mock.calls.some(
+        ([sql, params]) => String(sql).includes('INSERT INTO admin_action_logs') && params?.includes('VIEW_ADMIN_OBSERVATORY')
+      )
+    ).toBe(true);
   });
 
   it('exports the overview snapshot as a logged CSV action', async () => {

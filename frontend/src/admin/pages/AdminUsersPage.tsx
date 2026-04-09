@@ -7,6 +7,7 @@ import { ApiError } from '../../lib/apiClient'
 import AdminRecentAuthDialog from '../components/AdminRecentAuthDialog'
 import type { AdminSessionRow } from '../types'
 import { adminConsoleAPI } from '../lib/api'
+import { adminPaths, buildAppPath } from '../lib/paths'
 import { useAdminAuthStore } from '../store/adminAuthStore'
 import { Button } from '@/components/ui/button'
 import {
@@ -83,7 +84,7 @@ export default function AdminUsersPage() {
 
       if (session.session_type === 'admin' && session.id === currentSessionId) {
         await logout()
-        navigate('/admin/login', { replace: true })
+        navigate(adminPaths.login, { replace: true })
       }
     },
     onError: (error) => {
@@ -320,7 +321,7 @@ export default function AdminUsersPage() {
                         <td className="px-4 py-4 text-right">
                           <div className="flex flex-col items-end gap-2">
                             <Link
-                              to={`/admin/activity?sessionId=${encodeURIComponent(session.id)}`}
+                              to={buildAppPath(adminPaths.activity, `sessionId=${encodeURIComponent(session.id)}`)}
                               className="text-xs font-medium text-blue-700 hover:underline dark:text-blue-300"
                             >
                               Open activity
@@ -373,7 +374,7 @@ export default function AdminUsersPage() {
                     </div>
                     <div className="mt-3">
                       <Link
-                        to={`/admin/activity?sessionId=${encodeURIComponent(targetSession.id)}`}
+                        to={buildAppPath(adminPaths.activity, `sessionId=${encodeURIComponent(targetSession.id)}`)}
                         className="text-xs font-medium text-blue-700 hover:underline dark:text-blue-300"
                       >
                         Open this session in activity feed

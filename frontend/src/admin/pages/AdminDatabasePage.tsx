@@ -273,12 +273,12 @@ export default function AdminDatabasePage() {
         </div>
       </section>
 
-      <Tabs defaultValue="schema-map" className="space-y-4">
+      <Tabs defaultValue="safe-browse" className="space-y-4">
         <TabsList className="h-auto flex-wrap rounded-[1.25rem] p-1">
-          <TabsTrigger value="schema-map" className="rounded-xl px-4 py-2">Schema Map</TabsTrigger>
-          <TabsTrigger value="tables" className="rounded-xl px-4 py-2">Tables</TabsTrigger>
+          <TabsTrigger value="safe-browse" className="rounded-xl px-4 py-2">Rows</TabsTrigger>
+          <TabsTrigger value="tables" className="rounded-xl px-4 py-2">Table Workspace</TabsTrigger>
           <TabsTrigger value="relationships" className="rounded-xl px-4 py-2">Relationships</TabsTrigger>
-          <TabsTrigger value="safe-browse" className="rounded-xl px-4 py-2">Safe Browse</TabsTrigger>
+          <TabsTrigger value="schema-map" className="rounded-xl px-4 py-2">Schema Map</TabsTrigger>
         </TabsList>
 
         <TabsContent value="schema-map">

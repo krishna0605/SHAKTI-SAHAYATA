@@ -31,7 +31,7 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile.dev
-    ports:
+    ports: !override
       - "5173:5173"
     volumes:
       - ./frontend:/app
@@ -39,7 +39,24 @@ services:
     environment:
       VITE_API_URL: http://localhost:3001
       VITE_AI_URL: http://localhost:8000
+      VITE_ADMIN_APP_URL: http://localhost:4174
     command: npm run dev -- --host 0.0.0.0
+
+  admin-frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    ports: !override
+      - "4174:4174"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    environment:
+      VITE_API_URL: http://localhost:3001
+      VITE_AI_URL: http://localhost:8000
+      VITE_MAIN_APP_URL: http://localhost:5173
+      VITE_ADMIN_APP_URL: http://localhost:4174
+    command: npm run dev:admin -- --host 0.0.0.0
 
   # Dev: Mount source for hot reload
   ai-services:

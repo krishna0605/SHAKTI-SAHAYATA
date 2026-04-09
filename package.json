@@ -8,8 +8,9 @@
     "backend"
   ],
   "scripts": {
-    "dev": "concurrently -n FE,BE,AI -c blue,green,magenta \"npm run dev:frontend\" \"npm run dev:backend\" \"npm run dev:ai\"",
+    "dev": "concurrently -n FE,ADMIN,BE,AI -c blue,cyan,green,magenta \"npm run dev:frontend\" \"npm run dev:admin\" \"npm run dev:backend\" \"npm run dev:ai\"",
     "dev:frontend": "npm run dev --workspace=frontend",
+    "dev:admin": "npm run dev:admin --workspace=frontend",
     "dev:backend": "npm run dev --workspace=backend",
     "dev:ai": "cd ai-services && python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload",
     "up": "node scripts/up.mjs",
@@ -28,7 +29,7 @@
     "test:integration": "npm run test --workspace=backend",
     "test:e2e": "wait-on http-get://localhost:5173 http-get://localhost:3001/api/health && playwright test",
     "test:smoke": "wait-on http-get://localhost:5173 http-get://localhost:3001/api/health && playwright test tests/e2e/smoke.spec.ts",
-    "test:ci": "npm run test:unit && npm run build --workspace=frontend && npm run bundle:check"
+    "test:ci": "npm run test:unit && npm run build --workspace=frontend && npm run build:admin --workspace=frontend && npm run bundle:check"
   },
   "devDependencies": {
     "@playwright/test": "^1.59.1",

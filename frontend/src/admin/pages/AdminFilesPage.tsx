@@ -4,6 +4,7 @@ import { AlertTriangle, Search } from 'lucide-react'
 import { Link, useSearchParams } from 'react-router-dom'
 import type { AdminFileDeletionRow, AdminFileRow } from '../types'
 import { adminConsoleAPI } from '../lib/api'
+import { adminPaths, buildAppPath } from '../lib/paths'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -670,17 +671,20 @@ export default function AdminFilesPage() {
                     <div className="font-medium">{selectedUpload.uploaded_by_name || 'Unknown officer'}</div>
                     <div className="mt-1 text-muted-foreground">{selectedUpload.uploaded_by_buckle_id || 'No buckle ID'}</div>
                     <div className="mt-3 flex flex-wrap gap-3 text-xs">
-                      <Link to="/admin/cases" className="text-blue-700 hover:underline dark:text-blue-300">
+                      <Link to={adminPaths.cases} className="text-blue-700 hover:underline dark:text-blue-300">
                         Open cases view
                       </Link>
                       <Link
-                        to={`/admin/activity?resourceType=file&resourceId=${encodeURIComponent(String(selectedUpload.id))}`}
+                        to={buildAppPath(
+                          adminPaths.activity,
+                          `resourceType=file&resourceId=${encodeURIComponent(String(selectedUpload.id))}`
+                        )}
                         className="text-blue-700 hover:underline dark:text-blue-300"
                       >
                         Open file activity
                       </Link>
                       {selectedUpload.case_id ? (
-                        <Link to={`/admin/activity?caseId=${selectedUpload.case_id}`} className="text-blue-700 hover:underline dark:text-blue-300">
+                        <Link to={buildAppPath(adminPaths.activity, `caseId=${selectedUpload.case_id}`)} className="text-blue-700 hover:underline dark:text-blue-300">
                           Open case activity
                         </Link>
                       ) : null}
@@ -756,14 +760,17 @@ export default function AdminFilesPage() {
                     <div className="mt-3 flex flex-wrap gap-3 text-xs">
                       {selectedDeletion.file_id ? (
                         <Link
-                          to={`/admin/activity?resourceType=file&resourceId=${encodeURIComponent(selectedDeletion.file_id)}`}
+                          to={buildAppPath(
+                            adminPaths.activity,
+                            `resourceType=file&resourceId=${encodeURIComponent(selectedDeletion.file_id)}`
+                          )}
                           className="text-blue-700 hover:underline dark:text-blue-300"
                         >
                           Open file activity
                         </Link>
                       ) : null}
                       {selectedDeletion.case_id ? (
-                        <Link to={`/admin/activity?caseId=${selectedDeletion.case_id}`} className="text-blue-700 hover:underline dark:text-blue-300">
+                        <Link to={buildAppPath(adminPaths.activity, `caseId=${selectedDeletion.case_id}`)} className="text-blue-700 hover:underline dark:text-blue-300">
                           Open case activity
                         </Link>
                       ) : null}

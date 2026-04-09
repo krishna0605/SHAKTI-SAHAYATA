@@ -47,7 +47,7 @@ export const ADMIN_REFRESH_COOKIE_SECURE =
   || ADMIN_REFRESH_COOKIE_SAME_SITE === 'none';
 export const ADMIN_ALLOWED_ORIGINS = parseOrigins(
   process.env.ADMIN_ALLOWED_ORIGINS,
-  process.env.ALLOWED_ORIGINS || 'http://localhost:5173,http://localhost:3000'
+  process.env.ALLOWED_ORIGINS || 'http://localhost:5173,http://localhost:4174,http://localhost:3000'
 );
 
 export const ADMIN_AUTH_CONFIG = {

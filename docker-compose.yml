@@ -65,7 +65,8 @@ services:
       UPLOAD_DIR: /app/uploads
       MAX_FILE_SIZE: ${MAX_FILE_SIZE:-52428800}
       CHATBOT_DIAGNOSTICS_ENABLED: ${CHATBOT_DIAGNOSTICS_ENABLED:-true}
-      ADMIN_ALLOWED_ORIGINS: ${ADMIN_ALLOWED_ORIGINS:-http://localhost:5173,http://localhost:3000}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:5173,http://localhost:4174,http://localhost:3000}
+      ADMIN_ALLOWED_ORIGINS: ${ADMIN_ALLOWED_ORIGINS:-http://localhost:4174,http://localhost:5173,http://localhost:3000}
       BACKUP_STATUS_FILE: /app/runtime/backup-status.json
       RESTORE_STATUS_FILE: /app/runtime/restore-status.json
     ports:
@@ -117,10 +118,29 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        BUILD_SCRIPT: build
+        DIST_DIR: dist
     container_name: shakti-frontend
     ports:
       - "80:80"
       - "443:443"
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - shakti-network
+
+  admin-frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        BUILD_SCRIPT: build:admin
+        DIST_DIR: dist-admin
+    container_name: shakti-admin-frontend
+    ports:
+      - "${ADMIN_FRONTEND_PORT:-4174}:80"
     depends_on:
       - backend
     restart: unless-stopped

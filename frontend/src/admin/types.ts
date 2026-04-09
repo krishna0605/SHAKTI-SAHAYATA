@@ -87,6 +87,51 @@ export interface AdminOverviewResponse {
   recentActivity: ActivityEvent[]
 }
 
+export interface ObservatoryAttentionItem {
+  id: string
+  severity: 'warning' | 'critical' | 'info'
+  title: string
+  summary: string
+  href: string
+  acknowledged: boolean
+}
+
+export interface MonitoringStatusCard {
+  label: string
+  status: 'pass' | 'degraded' | 'fail'
+  metric: string
+  detail: string
+}
+
+export interface MonitoringFlagItem {
+  id: string
+  title: string
+  summary: string
+  severity: 'warning' | 'critical' | 'info'
+  href: string
+}
+
+export interface MonitoringQuickSignal {
+  label: string
+  value: string
+  tone: 'positive' | 'warning' | 'critical' | 'neutral'
+}
+
+export interface ObservatoryMonitoringSummary {
+  backend: MonitoringStatusCard
+  frontend: MonitoringStatusCard
+  api: MonitoringStatusCard
+  pipeline: MonitoringStatusCard
+  flags: MonitoringFlagItem[]
+  quickSignals: {
+    lastDeploy: MonitoringQuickSignal
+    lastSelfCheck: MonitoringQuickSignal
+    alertCount: MonitoringQuickSignal
+    errorTrend: MonitoringQuickSignal
+    featureFlags: MonitoringQuickSignal
+  }
+}
+
 export interface ActivityFeedResponse {
   items: ActivityEvent[]
   pagination: {
@@ -156,6 +201,25 @@ export interface AdminSessionsResponse {
     officerCount: number
     adminCount: number
   }
+}
+
+export interface ObservatorySessionsSummary {
+  officersOnline: number
+  adminsOnline: number
+  staleSessionCount: number
+  activeSessions: Array<{
+    id: string
+    session_type: 'officer' | 'admin'
+    actor_name: string
+    actor_email: string
+    actor_role: string
+    actor_badge: string | null
+    started_at: string
+    ended_at: string | null
+    ip_address: string | null
+    user_agent: string | null
+    session_age_seconds: number
+  }>
 }
 
 export interface AdminCaseAssignment {
@@ -286,6 +350,42 @@ export interface AdminFilesResponse {
     uploadsToday: number
     lockedCaseFiles: number
   }
+}
+
+export interface ObservatoryCasesSummary {
+  totalCases: number
+  lockedCases: number
+  highPriorityCases: number
+  recentCases: Array<{
+    id: number
+    case_name: string
+    case_number: string
+    status: string
+    priority: string
+    is_evidence_locked: boolean
+    updated_at: string
+    owner_name: string | null
+    owner_buckle_id: string | null
+  }>
+}
+
+export interface ObservatoryFilesSummary {
+  totalFiles: number
+  failedParseFiles: number
+  totalDeletions: number
+  processingJobs: number
+  failedIngestionJobs: number
+  recentFiles: Array<{
+    id: number
+    original_name: string | null
+    file_name: string
+    parse_status: string
+    uploaded_at: string
+    case_id: number | null
+    case_name: string | null
+    case_number: string | null
+    telecom_module: string
+  }>
 }
 
 export interface AdminFileDeletionRow {
@@ -558,6 +658,28 @@ export interface AdminSelfCheckResponse {
   snapshot: AdminSystemHealthResponse
 }
 
+export interface AdminObservatoryResponse {
+  generatedAt: string
+  summary: {
+    activeOfficers: number
+    activeAdmins: number
+    activeOfficerSessions: number
+    activeAdminSessions: number
+    openCases: number
+    uploadsToday: number
+    fileDeletionsToday: number
+    failedJobs: number
+    databaseStatus: 'pass' | 'degraded' | 'fail'
+  }
+  attention: ObservatoryAttentionItem[]
+  monitoring: ObservatoryMonitoringSummary
+  activity: ActivityEvent[]
+  sessions: ObservatorySessionsSummary
+  cases: ObservatoryCasesSummary
+  files: ObservatoryFilesSummary
+  health: AdminSystemHealthResponse
+}
+
 export interface AdminAlertItem {
   id: string
   rule: string
@@ -615,4 +737,152 @@ export interface AdminExportHistoryItem {
 
 export interface AdminExportHistoryResponse {
   items: AdminExportHistoryItem[]
+}
+
+export interface AdminSavedView {
+  id: string
+  label: string
+  description?: string
+}
+
+export interface AdminTrendPoint {
+  label: string
+  value: number
+  secondary?: number
+}
+
+export interface AdminIngestionRow {
+  uploadId: number
+  fileName: string
+  caseId: number | null
+  caseName: string | null
+  caseNumber: string | null
+  fileType: string
+  source: string
+  uploadedBy: string | null
+  uploadedAt: string
+  parseStatus: string
+  validationStatus: string
+  normalizationJobId: string | null
+  normalizationStatus: string | null
+  extractedRecords: number
+  errorSummary: string | null
+  parserVersion: string | null
+  normalizerVersion: string | null
+  fileChecksum: string | null
+  storagePath: string | null
+  sizeBytes: number | null
+  warningCount: number
+  retryCount: number
+}
+
+export interface AdminIngestionWorkspaceResponse {
+  generatedAt: string
+  summary: {
+    filesUploadedToday: number
+    pendingParsing: number
+    parsingInProgress: number
+    validationFailures: number
+    normalizationQueued: number
+    successfulIngestions: number
+    retriedJobs: number
+  }
+  charts: {
+    throughput: AdminTrendPoint[]
+    byType: Array<{ label: string; value: number }>
+    failureBySource: Array<{ label: string; value: number }>
+  }
+  items: AdminIngestionRow[]
+}
+
+export interface AdminMappingField {
+  rawField: string
+  sampleValue: string
+  standardizedField: string
+  confidence: number
+  transform: string
+  tone: 'neutral' | 'warning' | 'danger' | 'success' | 'info'
+}
+
+export interface AdminNormalizationJobRow {
+  jobId: string
+  caseId: number
+  caseName: string | null
+  uploadId: number | null
+  documentType: string
+  modelVersion: string
+  startedAt: string | null
+  completedAt: string | null
+  durationSeconds: number
+  status: string
+  confidenceScore: number
+  warningCount: number
+  errorCount: number
+  totalRows: number
+  validRows: number
+  rejectedRows: number
+  fileName: string | null
+  errorMessage: string | null
+}
+
+export interface AdminNormalizationWorkspaceResponse {
+  generatedAt: string
+  summary: {
+    jobsRunning: number
+    jobsCompleted: number
+    jobsFailed: number
+    averageDurationSeconds: number
+    lowConfidenceJobs: number
+    unmappedFieldCount: number
+    modelVersion: string
+  }
+  charts: {
+    durationTrend: AdminTrendPoint[]
+    confidenceDistribution: Array<{ label: string; value: number }>
+    failureReasons: Array<{ label: string; value: number }>
+    lowConfidenceTrend: AdminTrendPoint[]
+  }
+  jobs: AdminNormalizationJobRow[]
+  selectedJob: null | {
+    job: AdminNormalizationJobRow
+    stageTimeline: Array<{ id: string; title: string; detail: string; meta?: string; tone?: 'neutral' | 'success' | 'warning' | 'danger' | 'info' }>
+    mapping: AdminMappingField[]
+    anomalies: Array<{ label: string; value: string }>
+    schemaConformity: Array<{ label: string; value: string }>
+    outputReference: string | null
+  }
+}
+
+export interface AdminStorageAssetRow {
+  fileId: number
+  fileName: string
+  linkedCaseId: number | null
+  linkedCaseName: string | null
+  linkedCaseNumber: string | null
+  fileType: string
+  sizeBytes: number | null
+  uploadedBy: string | null
+  uploadedAt: string
+  checksum: string | null
+  retentionStatus: string
+  integrityStatus: string
+  malwareScanStatus: string
+  linkedJobId: string | null
+  storagePath: string | null
+  legalHold: boolean
+  quarantined: boolean
+}
+
+export interface AdminStorageWorkspaceResponse {
+  generatedAt: string
+  summary: {
+    totalFiles: number
+    totalStorageBytes: number
+    recentUploads: number
+    orphanedFiles: number
+    flaggedFiles: number
+    retentionExpiringAssets: number
+  }
+  byType: Array<{ label: string; value: number }>
+  items: AdminStorageAssetRow[]
 }

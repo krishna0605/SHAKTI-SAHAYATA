@@ -13,6 +13,7 @@ import {
 import { Link } from 'react-router-dom'
 import type { AdminHealthCheck } from '../types'
 import { adminConsoleAPI } from '../lib/api'
+import { adminPaths } from '../lib/paths'
 
 const severityClasses = {
   warning: 'border-amber-300/50 bg-amber-50 text-amber-800 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-200',
@@ -158,7 +159,7 @@ export default function AdminOverviewPage() {
 
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
             <Link
-              to="/admin/activity"
+              to={adminPaths.activity}
               className="rounded-[1.5rem] border border-border/70 bg-card/60 px-4 py-4 transition hover:border-blue-300/40 hover:bg-card"
             >
               <div className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">Global feed</div>
@@ -166,7 +167,7 @@ export default function AdminOverviewPage() {
               <div className="mt-2 text-sm text-muted-foreground">Search actors, sessions, IPs, and raw audit details.</div>
             </Link>
             <Link
-              to="/admin/users"
+              to={adminPaths.users}
               className="rounded-[1.5rem] border border-border/70 bg-card/60 px-4 py-4 transition hover:border-blue-300/40 hover:bg-card"
             >
               <div className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">Session control</div>
@@ -228,7 +229,7 @@ export default function AdminOverviewPage() {
         <article className="rounded-[1.75rem] border border-border/70 bg-card p-5">
           <div className="flex items-center justify-between gap-3">
             <h3 className="text-xl font-semibold">Recent Activity</h3>
-            <Link to="/admin/activity" className="text-sm font-medium text-blue-700 hover:underline dark:text-blue-300">
+            <Link to={adminPaths.activity} className="text-sm font-medium text-blue-700 hover:underline dark:text-blue-300">
               Open full feed
             </Link>
           </div>

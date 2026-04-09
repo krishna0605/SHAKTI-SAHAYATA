@@ -1,11 +1,12 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import { AlertCircle, ArrowLeft, Eye, EyeOff, ShieldCheck } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { adminAuthAPI } from '../lib/api'
+import { adminPaths, buildMainAppUrl } from '../lib/paths'
 import { useAdminAuthStore } from '../store/adminAuthStore'
 
 function getErrorMessage(error: unknown) {
@@ -24,7 +25,7 @@ export default function AdminLoginPage() {
 
   useEffect(() => {
     if (authStatus === 'authenticated' && admin) {
-      navigate('/admin', { replace: true })
+      navigate(adminPaths.home, { replace: true })
     }
   }, [admin, authStatus, navigate])
 
@@ -36,7 +37,7 @@ export default function AdminLoginPage() {
     try {
       const data = await adminAuthAPI.loginWithTotp(email.trim().toLowerCase(), password, totpCode.trim())
       setAuth(data.accessToken, data.admin, data.session)
-      navigate('/admin', { replace: true })
+      navigate(adminPaths.home, { replace: true })
     } catch (error: unknown) {
       setError(getErrorMessage(error))
     } finally {
@@ -51,10 +52,10 @@ export default function AdminLoginPage() {
           <CardHeader className="space-y-5 border-b border-border/70 pb-6 px-6 sm:px-8 pt-6">
             <div className="flex items-center justify-between">
               <Button asChild variant="ghost" size="sm" className="rounded-xl px-3">
-                <Link to="/login">
+                <a href={buildMainAppUrl('/login')}>
                   <ArrowLeft className="h-4 w-4" />
                   Officer Login
-                </Link>
+                </a>
               </Button>
               <Badge className="rounded-full border border-slate-300/40 bg-slate-100/90 text-slate-700 dark:border-slate-400/20 dark:bg-slate-500/10 dark:text-slate-200">
                 IT Access Only
