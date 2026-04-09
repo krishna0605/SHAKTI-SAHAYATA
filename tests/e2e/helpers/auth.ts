@@ -8,6 +8,7 @@ const adminBaseUrl = process.env.PLAYWRIGHT_ADMIN_BASE_URL || 'http://localhost:
 const adminEmail = process.env.PLAYWRIGHT_ADMIN_EMAIL || 'it.admin@police.gov.in'
 const adminPassword = process.env.PLAYWRIGHT_ADMIN_PASSWORD || ''
 const adminTotpCode = process.env.PLAYWRIGHT_ADMIN_TOTP || ''
+const normalizedAdminBaseUrl = adminBaseUrl.replace(/\/+$/, '')
 
 export interface OfficerCredentials {
   buckleId: string
@@ -47,6 +48,10 @@ async function selectShadcnOption(page: Page, triggerId: string, optionLabel: st
 
 function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function buildAdminConsoleUrlPattern() {
+  return new RegExp(`^${escapeRegExp(normalizedAdminBaseUrl)}(?:/|/dashboard)?(?:[?#].*)?$`, 'i')
 }
 
 export async function signUpFreshOfficer(page: Page, credentials = createOfficerCredentials()) {
@@ -138,5 +143,5 @@ export async function loginToAdminConsole(page: Page) {
   }
 
   await page.getByRole('button', { name: /enter admin console/i }).click()
-  await expect(page).toHaveURL(/dashboard/)
+  await expect(page).toHaveURL(buildAdminConsoleUrlPattern())
 }
