@@ -16,8 +16,10 @@ interface AdminAuthState {
   session: AdminSessionInfo | null
   authStatus: AdminAuthStatus
   setAuth: (token: string, admin: AdminIdentity, session?: AdminSessionInfo | null) => void
+  setAdminIdentity: (admin: AdminIdentity) => void
   clearAuth: () => void
   bootstrapAuth: () => Promise<void>
+  refreshAdminIdentity: () => Promise<AdminIdentity | null>
   logout: () => Promise<void>
 }
 
@@ -30,6 +32,13 @@ export const useAdminAuthStore = create<AdminAuthState>((set, get) => ({
   setAuth: (token, admin, session = null) => {
     setAdminAccessToken(token)
     set({ token, admin, session, authStatus: 'authenticated' })
+  },
+
+  setAdminIdentity: (admin) => {
+    set((state) => ({
+      ...state,
+      admin,
+    }))
   },
 
   clearAuth: () => {
@@ -51,6 +60,20 @@ export const useAdminAuthStore = create<AdminAuthState>((set, get) => ({
         return
       }
       get().clearAuth()
+    }
+  },
+
+  refreshAdminIdentity: async () => {
+    try {
+      const admin = await adminAuthAPI.getMe()
+      get().setAdminIdentity(admin)
+      return admin
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 429) {
+        return get().admin
+      }
+      get().clearAuth()
+      return null
     }
   },
 

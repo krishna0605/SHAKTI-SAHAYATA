@@ -188,6 +188,25 @@ This repository no longer ships reusable default login credentials for local dev
 - the admin password must be supplied at runtime through `BOOTSTRAP_ADMIN_PASSWORD`
 - operational data such as cases, uploads, alerts, and audit history is intentionally not seeded
 
+## Local Development Credentials
+
+For the current local development stack on this machine, these credentials are available and working:
+
+### Admin console
+
+- URL: `http://localhost:4174`
+- Email: `it.admin@police.gov.in`
+- Password: `Admin@Shakti2026!`
+
+### Main application officer login
+
+- URL: `http://localhost:5173`
+- Buckle ID: `BK-1041`
+- Email: `inspector01@police.gov.in`
+- Password: `Officer@Shakti2026!`
+
+These credentials are intended for local development only. If you rotate or re-bootstrap identities, update this section to match the current local setup.
+
 ## Common Commands
 
 ### Install
@@ -259,7 +278,7 @@ When someone else pulls this repo, they should be able to get running with this 
 5. Run `ollama pull phi3.5`.
 6. Run `npm run up`.
 7. Open `http://localhost:5173`.
-8. Sign in with one of the seeded local accounts.
+8. Sign in with the local development credentials listed in this README, or bootstrap fresh identities.
 
 ## Troubleshooting
 
@@ -284,9 +303,9 @@ When someone else pulls this repo, they should be able to get running with this 
 
 ### Login fails
 
-- confirm `database/seed.sql` ran successfully
+- confirm `npm run db:bootstrap-identities` has been run if you need local identities
 - verify the backend startup checks passed
-- retry with the seeded users listed above
+- retry with the development credentials listed above
 
 ## Repo Hygiene And Safety
 

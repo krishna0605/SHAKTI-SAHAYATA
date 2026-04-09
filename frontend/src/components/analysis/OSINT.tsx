@@ -1,16 +1,16 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { settingsAPI } from '../lib/apis';
 import {
   fetchIPDetails,
   fetchPhoneDetails,
   fetchDomainDetails,
   checkBreach,
   crawlUrls,
-  fetchCustomProviderDetails
+  fetchCustomProviderDetails,
+  getOSINTCapabilities,
 } from '../../lib/osintApi';
-import type { OSINTApiResult, CrawlResult, CustomOSINTProviderConfig } from '../../lib/osintApi';
+import type { OSINTApiResult, CrawlResult, CustomOSINTProviderConfig, OSINTCapabilitiesResponse } from '../../lib/osintApi';
 
 type BuiltInTab = 'phone' | 'ip' | 'social' | 'domain';
 type Tab = BuiltInTab | string;
@@ -73,24 +73,19 @@ const getPrimitiveSummaryRows = (details: Record<string, unknown>) =>
     value === null || ['string', 'number', 'boolean'].includes(typeof value)
   );
 
-const normalizeProviderList = (settings: Record<string, unknown>): CustomOSINTProviderConfig[] => {
-  const osint = isRecord(settings.osint) ? settings.osint : null;
-  const rows = osint && Array.isArray(osint.providers) ? osint.providers : [];
-  return rows
-    .filter((row): row is Record<string, unknown> => isRecord(row))
-    .map((row, index): CustomOSINTProviderConfig => ({
-      id: typeof row.id === 'string' && row.id.trim() ? row.id : `custom_${index}`,
-      name: typeof row.name === 'string' ? row.name.trim() : '',
-      apiUrl: typeof row.apiUrl === 'string' ? row.apiUrl.trim() : '',
-      token: typeof row.token === 'string' ? row.token : '',
-      enabled: typeof row.enabled === 'boolean' ? row.enabled : true,
-      method: row.method === 'POST' ? 'POST' : 'GET',
-      queryParam: typeof row.queryParam === 'string' && row.queryParam.trim() ? row.queryParam : 'query',
-      tokenHeader: typeof row.tokenHeader === 'string' && row.tokenHeader.trim() ? row.tokenHeader : 'Authorization',
-      tokenPrefix: typeof row.tokenPrefix === 'string' ? row.tokenPrefix : 'Bearer'
-    }))
-    .filter((provider) => provider.enabled !== false && provider.name && provider.apiUrl);
-};
+const normalizeProviderList = (capabilities: OSINTCapabilitiesResponse | null): CustomOSINTProviderConfig[] =>
+  (capabilities?.customProviders || [])
+    .filter((provider) => provider.enabled !== false && provider.name)
+    .map((provider) => ({
+      id: provider.id,
+      name: provider.name,
+      apiUrl: '',
+      enabled: provider.enabled,
+      method: provider.method,
+      queryParam: 'query',
+      tokenHeader: 'Authorization',
+      tokenPrefix: 'Bearer',
+    }));
 
 const buildGenericSummary = (providerName: string, data: unknown) => {
   if (Array.isArray(data)) {
@@ -119,13 +114,16 @@ export const OSINT: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [customProviders, setCustomProviders] = useState<CustomOSINTProviderConfig[]>([]);
+  const [capabilities, setCapabilities] = useState<OSINTCapabilitiesResponse | null>(null);
 
   useEffect(() => {
     (async () => {
       try {
-        const settings = await settingsAPI.get();
-        setCustomProviders(normalizeProviderList(settings));
+        const nextCapabilities = await getOSINTCapabilities();
+        setCapabilities(nextCapabilities);
+        setCustomProviders(normalizeProviderList(nextCapabilities));
       } catch {
+        setCapabilities(null);
         setCustomProviders([]);
       }
     })();
@@ -271,7 +269,7 @@ export const OSINT: React.FC = () => {
         default: {
           const provider = customProviders.find((item) => item.id === activeTab);
           if (!provider) throw new Error('Selected custom OSINT provider is not available. Reload settings.');
-          apiResult = await fetchCustomProviderDetails(provider, query);
+          apiResult = await fetchCustomProviderDetails(provider.id, query);
           if (!apiResult.success) throw new Error(apiResult.error || 'Custom OSINT request failed');
           rawData = apiResult.data;
           details = getDisplayDetails(apiResult.data);
@@ -587,6 +585,9 @@ export const OSINT: React.FC = () => {
           <span className="material-symbols-outlined text-6xl mb-4 opacity-20">travel_explore</span>
           <p className="text-lg">Select a tool and enter a query to begin OSINT analysis</p>
           <p className="text-sm mt-2">Custom API tabs appear here after you add them in Settings and save.</p>
+          {capabilities ? (
+            <p className="text-xs mt-1">Built-in live providers: phone {capabilities.phoneLookup ? 'enabled' : 'disabled'}, breach {capabilities.breachLookup ? 'enabled' : 'disabled'}.</p>
+          ) : null}
         </div>
       )}
     </div>

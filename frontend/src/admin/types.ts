@@ -874,6 +874,53 @@ export interface AdminStorageAssetRow {
   quarantined: boolean
 }
 
+export interface AdminStorageAssetDetail {
+  fileId: number
+  fileName: string
+  linkedCaseId: number | null
+  linkedCaseName: string | null
+  linkedCaseNumber: string | null
+  fileType: string
+  sizeBytes: number | null
+  uploadedBy: string | null
+  uploadedAt: string
+  checksum: string | null
+  retentionClass: string
+  retentionExpiresAt: string | null
+  integrityStatus: string
+  integrityVerifiedAt: string | null
+  malwareScanStatus: string
+  malwareScannedAt: string | null
+  linkedJobId: string | null
+  storagePath: string | null
+  legalHold: boolean
+  legalHoldReason: string | null
+  legalHoldSetAt: string | null
+  quarantined: boolean
+  quarantineReason: string | null
+  quarantinedAt: string | null
+  orphaned: boolean
+  duplicateOfFileId: number | null
+  lastGovernanceAction: string | null
+  lastGovernanceActionAt: string | null
+}
+
+export interface AdminStorageAssetDetailResponse {
+  asset: AdminStorageAssetDetail
+  capabilities: {
+    canManageGovernance: boolean
+    requiresRecentAuth: boolean
+  }
+  governanceTimeline: Array<{
+    id: number
+    action: string
+    createdAt: string
+    actorName: string
+    actorEmail: string | null
+    details: Record<string, unknown>
+  }>
+}
+
 export interface AdminStorageWorkspaceResponse {
   generatedAt: string
   summary: {

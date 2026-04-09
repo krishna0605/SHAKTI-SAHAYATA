@@ -13,6 +13,7 @@ import { ADMIN_CONSOLE_CONFIG } from '../../config/adminConsole.js';
 import { authenticateAdminToken } from '../../middleware/admin/authenticateAdminToken.js';
 import { logAdminAction } from '../../services/admin/adminAudit.service.js';
 import { getAdminTotpPolicyState, verifyAdminTotpCode } from '../../services/admin/adminTotp.service.js';
+import { emitAdminConsoleEvent } from '../../services/admin/adminEventStream.service.js';
 
 const router = Router();
 
@@ -699,6 +700,11 @@ router.post('/change-password', authenticateAdminToken, async (req, res) => {
       resourceType: 'admin_account',
       resourceId: String(admin.id),
       ipAddress: req.ip,
+    });
+
+    emitAdminConsoleEvent('sessions.changed', {
+      adminId: admin.id,
+      mustChangePassword: false,
     });
 
     return res.json({ message: 'Admin password updated successfully' });

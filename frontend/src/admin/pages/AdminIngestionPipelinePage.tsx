@@ -5,16 +5,18 @@ import { adminConsoleAPI } from '../lib/api'
 import { formatBytes, formatNumber, formatTimestamp, normalizeStatusTone, titleCase } from '../lib/format'
 import { adminPaths } from '../lib/paths'
 import { OpsDataTable, OpsDefinitionList, OpsDrawerInspector, OpsEntityChip, OpsFilterBar, OpsMetricTile, OpsPageState, OpsSection, OpsStatusBadge, OpsSummaryStrip } from '../components/OpsPrimitives'
+import { useAdminLiveUpdates } from '../components/AdminLiveUpdatesProvider'
 import { Input } from '@/components/ui/input'
 
 export default function AdminIngestionPipelinePage() {
+  const { isConnected } = useAdminLiveUpdates()
   const [search, setSearch] = useState('')
   const [selectedUploadId, setSelectedUploadId] = useState<number | null>(null)
 
   const ingestionQuery = useQuery({
     queryKey: ['ops-ingestion', search],
     queryFn: () => adminConsoleAPI.getIngestionWorkspace({ q: search, limit: 50 }),
-    refetchInterval: 30000,
+    refetchInterval: isConnected ? false : 30000,
   })
 
   const selectedRow = useMemo(

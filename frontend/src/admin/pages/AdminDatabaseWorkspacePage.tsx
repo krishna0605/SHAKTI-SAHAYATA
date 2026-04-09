@@ -1,10 +1,14 @@
 import { useMemo, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle, Maximize2, Search, ShieldAlert } from 'lucide-react'
 import { useSearchParams } from 'react-router-dom'
+import { toast } from 'sonner'
+import { ApiError } from '../../lib/apiClient'
 import { adminConsoleAPI } from '../lib/api'
 import { formatBytes, formatNumber, formatTimestamp, normalizeStatusTone, titleCase } from '../lib/format'
 import { adminPaths } from '../lib/paths'
+import { useAdminLiveUpdates } from '../components/AdminLiveUpdatesProvider'
+import AdminRecentAuthDialog from '../components/AdminRecentAuthDialog'
 import {
   OpsDataTable,
   OpsDefinitionList,
@@ -23,6 +27,8 @@ import { Input } from '@/components/ui/input'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
 export default function AdminDatabaseWorkspacePage() {
+  const { isConnected } = useAdminLiveUpdates()
+  const queryClient = useQueryClient()
   const [searchParams, setSearchParams] = useSearchParams()
   const activeTab = searchParams.get('tab') || 'schema'
   const [selectedTable, setSelectedTable] = useState<string | null>(null)
@@ -31,11 +37,16 @@ export default function AdminDatabaseWorkspacePage() {
   const [selectedAssetId, setSelectedAssetId] = useState<number | null>(null)
   const [selectedServiceLabel, setSelectedServiceLabel] = useState<string | null>(null)
   const [selectedLogId, setSelectedLogId] = useState<string | null>(null)
+  const [recentAuthOpen, setRecentAuthOpen] = useState(false)
+  const [pendingStorageAction, setPendingStorageAction] = useState<null | {
+    action: 'place_legal_hold' | 'release_legal_hold' | 'quarantine' | 'release_quarantine' | 'recheck_integrity'
+    reason?: string
+  }>(null)
 
   const schemaQuery = useQuery({
     queryKey: ['ops-database-schema'],
     queryFn: () => adminConsoleAPI.getDatabaseSchema(),
-    refetchInterval: 60000,
+    refetchInterval: isConnected ? false : 60000,
   })
   const tableQuery = useQuery({
     queryKey: ['ops-database-table', selectedTable],
@@ -45,17 +56,22 @@ export default function AdminDatabaseWorkspacePage() {
   const storageQuery = useQuery({
     queryKey: ['ops-storage-workspace'],
     queryFn: () => adminConsoleAPI.getStorageWorkspace({ limit: 30 }),
-    refetchInterval: 30000,
+    refetchInterval: isConnected ? false : 30000,
+  })
+  const storageAssetDetailQuery = useQuery({
+    queryKey: ['ops-storage-asset', selectedAssetId],
+    queryFn: () => adminConsoleAPI.getStorageAssetDetail(selectedAssetId as number),
+    enabled: Boolean(selectedAssetId),
   })
   const healthQuery = useQuery({
     queryKey: ['ops-observability'],
     queryFn: () => adminConsoleAPI.getSystemHealth(),
-    refetchInterval: 30000,
+    refetchInterval: isConnected ? false : 30000,
   })
   const logsQuery = useQuery({
     queryKey: ['ops-logs'],
     queryFn: () => adminConsoleAPI.getActivity({ limit: 40 }),
-    refetchInterval: 15000,
+    refetchInterval: isConnected ? false : 15000,
   })
 
   const serviceRows = useMemo(() => {
@@ -72,9 +88,35 @@ export default function AdminDatabaseWorkspacePage() {
     ]
   }, [healthQuery.data])
 
-  const selectedAsset = storageQuery.data?.items.find((item) => item.fileId === selectedAssetId) || null
+  const selectedAssetSummary = storageQuery.data?.items.find((item) => item.fileId === selectedAssetId) || null
+  const selectedAsset = storageAssetDetailQuery.data?.asset || null
   const selectedService = serviceRows.find((service) => service.label === selectedServiceLabel) || null
   const selectedLog = logsQuery.data?.items.find((item) => `${item.source}-${item.id}` === selectedLogId) || null
+
+  const storageGovernanceMutation = useMutation({
+    mutationFn: ({
+      action,
+      reason,
+    }: {
+      action: 'place_legal_hold' | 'release_legal_hold' | 'quarantine' | 'release_quarantine' | 'recheck_integrity'
+      reason?: string
+    }) => adminConsoleAPI.applyStorageGovernanceAction(selectedAssetId as number, action, { reason }),
+    onSuccess: async () => {
+      setPendingStorageAction(null)
+      toast.success('Storage governance updated.')
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['ops-storage-workspace'] }),
+        queryClient.invalidateQueries({ queryKey: ['ops-storage-asset', selectedAssetId] }),
+      ])
+    },
+    onError: (error) => {
+      if (error instanceof ApiError && error.code === 'RECENT_ADMIN_AUTH_REQUIRED') {
+        setRecentAuthOpen(true)
+        return
+      }
+      toast.error(error instanceof Error ? error.message : 'Failed to update storage governance.')
+    },
+  })
 
   const filteredSchema = useMemo(() => {
     if (!schemaQuery.data) return null
@@ -227,7 +269,7 @@ export default function AdminDatabaseWorkspacePage() {
             onOpenChange={(open) => {
               if (!open) setSelectedAssetId(null)
             }}
-            title={selectedAsset?.fileName || 'Asset inspector'}
+            title={selectedAsset?.fileName || selectedAssetSummary?.fileName || 'Asset inspector'}
             subtitle="Retention, integrity, case linkage, and metadata"
           >
             {selectedAsset ? (
@@ -240,14 +282,102 @@ export default function AdminDatabaseWorkspacePage() {
                     { label: 'Checksum', value: selectedAsset.checksum || 'Unavailable' },
                     { label: 'Storage Path', value: selectedAsset.storagePath || 'Unavailable' },
                     { label: 'Linked Job', value: selectedAsset.linkedJobId || 'Not linked' },
+                    { label: 'Retention Class', value: titleCase(selectedAsset.retentionClass || 'standard') },
+                    { label: 'Retention Expiry', value: formatTimestamp(selectedAsset.retentionExpiresAt) },
+                    { label: 'Integrity Verified', value: formatTimestamp(selectedAsset.integrityVerifiedAt) },
+                    { label: 'Malware Scanned', value: formatTimestamp(selectedAsset.malwareScannedAt) },
                   ]}
                   monoKeys={['Checksum', 'Storage Path', 'Linked Job']}
                 />
                 <div className="flex flex-wrap gap-2">
+                  <OpsStatusBadge label={titleCase(selectedAsset.integrityStatus)} tone={normalizeStatusTone(selectedAsset.integrityStatus)} />
+                  <OpsStatusBadge label={titleCase(selectedAsset.malwareScanStatus)} tone={normalizeStatusTone(selectedAsset.malwareScanStatus)} />
                   <OpsStatusBadge label={selectedAsset.legalHold ? 'Legal Hold' : 'Standard Retention'} tone={selectedAsset.legalHold ? 'warning' : 'info'} />
                   <OpsStatusBadge label={selectedAsset.quarantined ? 'Quarantined' : 'Operational'} tone={selectedAsset.quarantined ? 'danger' : 'success'} />
+                  {selectedAsset.orphaned ? <OpsStatusBadge label="Orphaned" tone="warning" /> : null}
+                  {selectedAsset.duplicateOfFileId ? <OpsStatusBadge label={`Duplicate of ${selectedAsset.duplicateOfFileId}`} tone="neutral" /> : null}
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <OpsMetricTile label="Retention" value={selectedAsset.retentionClass || 'standard'} detail={selectedAsset.retentionExpiresAt ? `Expires ${formatTimestamp(selectedAsset.retentionExpiresAt)}` : 'No expiry recorded'} tone="info" />
+                  <OpsMetricTile label="Governance Action" value={titleCase(selectedAsset.lastGovernanceAction || 'none')} detail={selectedAsset.lastGovernanceActionAt ? formatTimestamp(selectedAsset.lastGovernanceActionAt) : 'No manual action recorded'} tone="neutral" />
+                </div>
+                <div className="space-y-2">
+                  <div className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">Governance actions</div>
+                  {storageAssetDetailQuery.data?.capabilities.canManageGovernance ? (
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="rounded-lg"
+                        disabled={storageGovernanceMutation.isPending}
+                        onClick={() => {
+                          const nextAction = selectedAsset.legalHold ? 'release_legal_hold' : 'place_legal_hold'
+                          const reason = selectedAsset.legalHold ? undefined : 'Manual legal hold from admin console'
+                          setPendingStorageAction({ action: nextAction, reason })
+                          storageGovernanceMutation.mutate({ action: nextAction, reason })
+                        }}
+                      >
+                        {selectedAsset.legalHold ? 'Release legal hold' : 'Place legal hold'}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="rounded-lg"
+                        disabled={storageGovernanceMutation.isPending}
+                        onClick={() => {
+                          const nextAction = selectedAsset.quarantined ? 'release_quarantine' : 'quarantine'
+                          const reason = selectedAsset.quarantined ? undefined : 'Manual quarantine from admin console'
+                          setPendingStorageAction({ action: nextAction, reason })
+                          storageGovernanceMutation.mutate({ action: nextAction, reason })
+                        }}
+                      >
+                        {selectedAsset.quarantined ? 'Release quarantine' : 'Quarantine asset'}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="rounded-lg"
+                        disabled={storageGovernanceMutation.isPending}
+                        onClick={() => {
+                          setPendingStorageAction({ action: 'recheck_integrity' })
+                          storageGovernanceMutation.mutate({ action: 'recheck_integrity' })
+                        }}
+                      >
+                        Recheck integrity
+                      </Button>
+                    </div>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">Governance actions are view-only for this admin role.</p>
+                  )}
+                </div>
+                <div className="ops-subpanel">
+                  <div className="ops-subpanel-title">Governance notes</div>
+                  <div className="space-y-2 text-sm text-muted-foreground">
+                    <p>{selectedAsset.legalHoldReason || 'No legal hold reason recorded.'}</p>
+                    <p>{selectedAsset.quarantineReason || 'No quarantine reason recorded.'}</p>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <div className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">Governance timeline</div>
+                  <div className="space-y-2">
+                    {(storageAssetDetailQuery.data?.governanceTimeline || []).length ? (
+                      storageAssetDetailQuery.data?.governanceTimeline.map((item) => (
+                        <div key={item.id} className="ops-list-row">
+                          <div>
+                            <div className="font-medium">{titleCase(item.action.replace(/^STORAGE_GOVERNANCE_/, '').replace(/_/g, ' '))}</div>
+                            <div className="text-xs text-muted-foreground">{item.actorName} • {formatTimestamp(item.createdAt)}</div>
+                          </div>
+                          <OpsStatusBadge label={item.actorEmail || 'admin'} tone="neutral" />
+                        </div>
+                      ))
+                    ) : (
+                      <p className="text-sm text-muted-foreground">No governance actions recorded yet.</p>
+                    )}
+                  </div>
                 </div>
               </div>
+            ) : storageAssetDetailQuery.isLoading ? (
+              <OpsPageState title="Loading asset detail" description="Fetching persisted governance metadata for the selected evidence asset." />
             ) : (
               <OpsPageState title="No asset selected" description="Select an asset row to inspect details." />
             )}
@@ -356,6 +486,19 @@ export default function AdminDatabaseWorkspacePage() {
           </OpsDrawerInspector>
         </TabsContent>
       </Tabs>
+
+      <AdminRecentAuthDialog
+        open={recentAuthOpen}
+        onOpenChange={setRecentAuthOpen}
+        title="Recent auth required"
+        description="Storage governance updates are sensitive actions. Re-authenticate before applying this change."
+        onSuccess={async () => {
+          setRecentAuthOpen(false)
+          if (pendingStorageAction) {
+            await storageGovernanceMutation.mutateAsync(pendingStorageAction)
+          }
+        }}
+      />
     </div>
   )
 }

@@ -13,6 +13,7 @@ const ROLE_PERMISSIONS = {
     'export_cases',
     'export_files',
     'view_export_history',
+    'manage_storage_governance',
   ]),
   it_auditor: new Set([
     'console_access',

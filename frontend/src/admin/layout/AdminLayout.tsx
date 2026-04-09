@@ -9,6 +9,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Input } from '@/components/ui/input'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
+import { useAdminLiveUpdates } from '../components/AdminLiveUpdatesProvider'
 
 const SIDEBAR_STORAGE_KEY = 'shakti-admin-sidebar-collapsed'
 
@@ -34,6 +35,7 @@ export default function AdminLayout() {
   const [collapsed, setCollapsed] = useState(false)
   const routeMeta = resolveAdminRouteMeta(location.pathname)
   const breadcrumbs = resolveBreadcrumbs(location.pathname)
+  const liveUpdates = useAdminLiveUpdates()
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -173,6 +175,9 @@ export default function AdminLayout() {
                   </div>
 
                   <div className="flex items-center gap-2">
+                    <div className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-xs text-slate-300">
+                      {liveUpdates.isConnected ? 'Live updates' : 'Refresh fallback active'}
+                    </div>
                     {pageAction}
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>

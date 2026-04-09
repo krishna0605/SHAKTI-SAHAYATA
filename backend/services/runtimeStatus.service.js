@@ -39,6 +39,11 @@ const readJsonIfExists = async (filePath) => {
   }
 };
 
+const parseBool = (value, fallback = false) => {
+  if (value === undefined || value === null || String(value).trim() === '') return fallback;
+  return ['1', 'true', 'yes', 'on'].includes(String(value).trim().toLowerCase());
+};
+
 const parseBackupSummary = async () => {
   const [backup, restore] = await Promise.all([
     readJsonIfExists(DEFAULT_BACKUP_STATUS_PATH),
@@ -80,6 +85,8 @@ export const runStartupSelfChecks = async ({
   const checks = {};
   const failed = [];
   const degraded = [];
+  const requireBootstrapIdentities =
+    parseBool(process.env.REQUIRE_BOOTSTRAP_IDENTITIES, process.env.NODE_ENV === 'production');
 
   try {
     await pool.query('SELECT NOW() AS server_time');
@@ -127,22 +134,38 @@ export const runStartupSelfChecks = async ({
     const adminCount = result.rows[0]?.admin_count || 0;
 
     if (officerCount < 50 || adminCount < 1) {
+      const status = requireBootstrapIdentities ? FAIL : DEGRADED;
       checks.bootstrapIdentities = buildCheck(
-        FAIL,
-        `Controlled bootstrap identities are incomplete (officers=${officerCount}, admins=${adminCount}).`,
-        { officerCount, adminCount }
+        status,
+        requireBootstrapIdentities
+          ? `Controlled bootstrap identities are incomplete (officers=${officerCount}, admins=${adminCount}).`
+          : `Controlled bootstrap identities are incomplete for full production truthfulness (officers=${officerCount}, admins=${adminCount}). Development startup is allowed in degraded mode.`,
+        { officerCount, adminCount, required: requireBootstrapIdentities }
       );
-      failed.push('bootstrapIdentities');
+      if (requireBootstrapIdentities) {
+        failed.push('bootstrapIdentities');
+      } else {
+        degraded.push('bootstrapIdentities');
+      }
     } else {
       checks.bootstrapIdentities = buildCheck(
         PASS,
         'Controlled officer and admin bootstrap identities are available.',
-        { officerCount, adminCount }
+        { officerCount, adminCount, required: requireBootstrapIdentities }
       );
     }
   } catch (error) {
-    checks.bootstrapIdentities = buildCheck(FAIL, error?.message || 'Unable to verify controlled bootstrap identities');
-    failed.push('bootstrapIdentities');
+    const status = requireBootstrapIdentities ? FAIL : DEGRADED;
+    checks.bootstrapIdentities = buildCheck(
+      status,
+      error?.message || 'Unable to verify controlled bootstrap identities',
+      { required: requireBootstrapIdentities }
+    );
+    if (requireBootstrapIdentities) {
+      failed.push('bootstrapIdentities');
+    } else {
+      degraded.push('bootstrapIdentities');
+    }
   }
 
   const ollamaConfig = getOllamaRuntimeConfig();

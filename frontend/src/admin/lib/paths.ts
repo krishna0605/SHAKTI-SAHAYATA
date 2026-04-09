@@ -30,6 +30,7 @@ const withLeadingSlash = (value: string) => {
 
 export const adminPaths = {
   login: '/login',
+  forcePasswordChange: '/security/update-password',
   home: '/',
   dashboard: '/',
   cases: '/cases',

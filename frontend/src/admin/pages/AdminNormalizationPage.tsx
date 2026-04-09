@@ -4,17 +4,19 @@ import { AlertTriangle } from 'lucide-react'
 import { adminConsoleAPI } from '../lib/api'
 import { formatDurationSeconds, formatNumber, formatTimestamp, normalizeStatusTone, titleCase } from '../lib/format'
 import { OpsDataTable, OpsDefinitionList, OpsDrawerInspector, OpsFilterBar, OpsMetricTile, OpsPageState, OpsSection, OpsStatusBadge, OpsSummaryStrip, OpsTimeline } from '../components/OpsPrimitives'
+import { useAdminLiveUpdates } from '../components/AdminLiveUpdatesProvider'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 
 export default function AdminNormalizationPage() {
+  const { isConnected } = useAdminLiveUpdates()
   const [search, setSearch] = useState('')
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null)
 
   const normalizationQuery = useQuery({
     queryKey: ['ops-normalization', search, selectedJobId],
     queryFn: () => adminConsoleAPI.getNormalizationWorkspace({ q: search, focusJobId: selectedJobId || undefined, limit: 40 }),
-    refetchInterval: 30000,
+    refetchInterval: isConnected ? false : 30000,
   })
 
   const selectedJob = normalizationQuery.data?.selectedJob

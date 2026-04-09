@@ -24,7 +24,12 @@ import {
   fetchAdminNormalizationWorkspace,
   fetchAdminStorageWorkspace,
 } from '../../services/admin/adminOpsWorkspace.service.js';
+import {
+  applyStorageGovernanceAction,
+  fetchStorageAssetDetail,
+} from '../../services/admin/adminStorageGovernance.service.js';
 import { buildAdminSystemHealthSnapshot, runAdminSystemSelfCheck } from '../../services/admin/adminSystem.service.js';
+import { emitAdminConsoleEvent, getAdminEventStreamSnapshot, subscribeToAdminEvents } from '../../services/admin/adminEventStream.service.js';
 
 const router = Router();
 
@@ -187,6 +192,111 @@ router.get('/ops/storage', requireAdminPermission('console_access'), async (req,
   }
 });
 
+router.get('/ops/storage/:fileId', requireAdminPermission('console_access'), async (req, res) => {
+  try {
+    const fileId = Number(req.params.fileId);
+    if (!Number.isFinite(fileId) || fileId <= 0) {
+      return res.status(400).json({ error: 'Valid file id is required' });
+    }
+
+    const payload = await fetchStorageAssetDetail({
+      fileId,
+      admin: { role: req.admin.role },
+    });
+
+    if (!payload) {
+      return res.status(404).json({ error: 'Storage asset not found' });
+    }
+
+    return res.json(payload);
+  } catch (error) {
+    console.error('[ADMIN] Storage asset detail error:', error);
+    return res.status(500).json({ error: 'Failed to load storage asset detail' });
+  }
+});
+
+router.post(
+  '/ops/storage/:fileId/actions/:action',
+  requireAdminRole('it_admin'),
+  requireAdminPermission('manage_storage_governance'),
+  requireRecentAdminAuth(),
+  async (req, res) => {
+    try {
+      const fileId = Number(req.params.fileId);
+      const action = String(req.params.action || '').trim();
+
+      if (!Number.isFinite(fileId) || fileId <= 0) {
+        return res.status(400).json({ error: 'Valid file id is required' });
+      }
+
+      const payload = await applyStorageGovernanceAction({
+        fileId,
+        action,
+        adminAccountId: req.admin.adminId,
+        reason: req.body?.reason || null,
+        duplicateOfFileId: req.body?.duplicateOfFileId || null,
+      });
+
+      await logAdminAction({
+        adminAccountId: req.admin.adminId,
+        sessionId: req.admin.sessionId,
+        action: `STORAGE_GOVERNANCE_${action.toUpperCase()}`,
+        resourceType: 'file_governance',
+        resourceId: String(fileId),
+        ipAddress: req.ip,
+        details: {
+          reason: req.body?.reason || null,
+          duplicateOfFileId: req.body?.duplicateOfFileId || null,
+        },
+      });
+
+      emitAdminConsoleEvent('storage.changed', {
+        fileId,
+        action,
+      });
+
+      return res.json(payload);
+    } catch (error) {
+      console.error('[ADMIN] Storage governance action error:', error);
+      return res.status(500).json({ error: error?.message || 'Failed to apply storage governance action' });
+    }
+  }
+);
+
+router.get('/stream', requireAdminPermission('console_access'), async (req, res) => {
+  res.status(200);
+  res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders?.();
+
+  const writeEvent = (name, payload = {}) => {
+    res.write(`event: ${name}\n`);
+    res.write(`data: ${JSON.stringify(payload)}\n\n`);
+  };
+
+  const heartbeat = setInterval(() => {
+    writeEvent('stream.heartbeat', { at: new Date().toISOString() });
+  }, 20000);
+
+  const unsubscribe = subscribeToAdminEvents((message) => {
+    writeEvent(message.event, message.payload || {});
+  });
+
+  try {
+    const snapshot = await getAdminEventStreamSnapshot();
+    writeEvent('stream.connected', { snapshot });
+  } catch (error) {
+    writeEvent('stream.error', { message: error?.message || 'Failed to initialize stream snapshot.' });
+  }
+
+  req.on('close', () => {
+    clearInterval(heartbeat);
+    unsubscribe();
+    res.end();
+  });
+});
+
 router.get('/system/health', requireAdminPermission('view_system'), async (req, res) => {
   try {
     const admin = await toAdminSecurityProfile(req.admin.adminId);
@@ -283,6 +393,11 @@ router.post(
         resourceId: alertId,
         ipAddress: req.ip,
         details: { note },
+      });
+
+      emitAdminConsoleEvent('alerts.changed', {
+        alertId,
+        acknowledged: true,
       });
 
       return res.json({ acknowledged: true, alertId, acknowledgement });

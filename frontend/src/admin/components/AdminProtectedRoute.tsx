@@ -1,11 +1,12 @@
 import { useEffect } from 'react'
-import { Navigate, Outlet } from 'react-router-dom'
+import { Navigate, Outlet, useLocation } from 'react-router-dom'
 import { Shield } from 'lucide-react'
 import { useAdminAuthStore } from '../store/adminAuthStore'
 import { adminPaths } from '../lib/paths'
 
 export default function AdminProtectedRoute() {
-  const { authStatus, bootstrapAuth } = useAdminAuthStore()
+  const location = useLocation()
+  const { authStatus, bootstrapAuth, admin } = useAdminAuthStore()
 
   useEffect(() => {
     if (authStatus === 'unknown') {
@@ -29,6 +30,10 @@ export default function AdminProtectedRoute() {
 
   if (authStatus !== 'authenticated') {
     return <Navigate to={adminPaths.login} replace />
+  }
+
+  if (admin?.mustChangePassword && location.pathname !== adminPaths.forcePasswordChange) {
+    return <Navigate to={adminPaths.forcePasswordChange} replace />
   }
 
   return <Outlet />

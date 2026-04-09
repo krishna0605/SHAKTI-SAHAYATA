@@ -20,6 +20,7 @@ import type {
   AdminSelfCheckResponse,
   AdminSessionInfo,
   AdminSessionsResponse,
+  AdminStorageAssetDetailResponse,
   AdminStorageWorkspaceResponse,
   AdminSystemHealthResponse,
   AdminUsersResponse,
@@ -426,6 +427,24 @@ export const adminConsoleAPI = {
   } = {}) {
     const query = buildSearchParams(filters)
     return adminApiClient.request<AdminStorageWorkspaceResponse>(`/ops/storage${query ? `?${query}` : ''}`)
+  },
+
+  async getStorageAssetDetail(fileId: number | string) {
+    return adminApiClient.request<AdminStorageAssetDetailResponse>(`/ops/storage/${encodeURIComponent(String(fileId))}`)
+  },
+
+  async applyStorageGovernanceAction(
+    fileId: number | string,
+    action: 'place_legal_hold' | 'release_legal_hold' | 'quarantine' | 'release_quarantine' | 'recheck_integrity' | 'mark_duplicate',
+    payload: { reason?: string; duplicateOfFileId?: number | null } = {}
+  ) {
+    return adminApiClient.request<AdminStorageAssetDetailResponse>(
+      `/ops/storage/${encodeURIComponent(String(fileId))}/actions/${encodeURIComponent(action)}`,
+      {
+        method: 'POST',
+        body: payload,
+      }
+    )
   },
 
   async getDatabaseSchema() {

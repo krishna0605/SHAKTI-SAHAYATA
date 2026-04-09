@@ -22,6 +22,33 @@ export interface CustomOSINTProviderConfig {
   tokenPrefix?: string;
 }
 
+export interface OSINTCapabilitiesResponse {
+  crawl: boolean;
+  phoneLookup: boolean;
+  breachLookup: boolean;
+  providers: {
+    phone: {
+      enabled: boolean;
+      method: 'GET' | 'POST';
+      provider?: string;
+      resultType?: string;
+    };
+    breach: {
+      enabled: boolean;
+      method: 'GET' | 'POST';
+      provider?: string;
+      resultType?: string;
+    };
+  };
+  customProviders: Array<{
+    id: string;
+    name: string;
+    method: 'GET' | 'POST';
+    enabled: boolean;
+    resultType?: string;
+  }>;
+}
+
 export interface CrawlResult {
   url: string;
   title: string;
@@ -57,6 +84,28 @@ const resolveBaseUrl = () => {
 };
 
 const BASE_URL = resolveBaseUrl();
+
+export const getOSINTCapabilities = async (): Promise<OSINTCapabilitiesResponse> => {
+  const makeRequest = () => {
+    const token = getAccessToken();
+    return fetch(`${BASE_URL}/api/osint/capabilities`, {
+      method: 'GET',
+      credentials: 'include',
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+  };
+
+  let response = await makeRequest();
+  if (response.status === 401 && await apiClient.refreshAccessToken(false)) {
+    response = await makeRequest();
+  }
+
+  if (!response.ok) {
+    throw new Error(`Failed to load OSINT capabilities (${response.status})`);
+  }
+
+  return response.json();
+};
 
 const postBackendLookup = async (endpoint: string, body: Record<string, unknown>): Promise<BackendLookupResult> => {
   const makeRequest = () => {
@@ -151,67 +200,24 @@ export const crawlUrls = async (urls: string[]): Promise<CrawlResult[]> => {
 };
 
 /* ─── Custom Provider Support ─── */
-const normalizeProviderMethod = (method?: string) => (method?.toUpperCase() === 'POST' ? 'POST' : 'GET');
-
 export const fetchCustomProviderDetails = async (
-  provider: CustomOSINTProviderConfig,
+  providerId: string,
   query: string
 ): Promise<OSINTApiResult> => {
-  const method = normalizeProviderMethod(provider.method);
-  const queryParam = (provider.queryParam || 'query').trim() || 'query';
-  const tokenHeader = (provider.tokenHeader || 'Authorization').trim() || 'Authorization';
-  const tokenPrefix = provider.tokenPrefix ?? 'Bearer';
-
   try {
-    const headers: Record<string, string> = {};
-    const token = (provider.token || '').trim();
-    if (token) {
-      headers[tokenHeader] =
-        tokenHeader.toLowerCase() === 'authorization' && tokenPrefix !== ''
-          ? `${tokenPrefix} ${token}`.trim()
-          : token;
-    }
-
-    let url = provider.apiUrl;
-    let body: string | undefined;
-    if (method === 'GET') {
-      const parsed = new URL(provider.apiUrl);
-      parsed.searchParams.set(queryParam, query);
-      url = parsed.toString();
-    } else {
-      headers['Content-Type'] = 'application/json';
-      body = JSON.stringify({
-        [queryParam]: query,
-        query
-      });
-    }
-
-    const response = await fetch(url, { method, headers, body });
-    const contentType = response.headers.get('content-type') || '';
-    const parsedData = contentType.includes('application/json')
-      ? await response.json()
-      : await response.text();
-
-    if (!response.ok) {
-      const errMsg =
-        typeof parsedData === 'string'
-          ? parsedData
-          : (parsedData && typeof parsedData === 'object' && 'error' in parsedData && typeof (parsedData as { error?: unknown }).error === 'string'
-              ? (parsedData as { error: string }).error
-              : `HTTP ${response.status}`);
-      throw new Error(errMsg);
-    }
+    const result = await postBackendLookup(`/api/osint/custom/${encodeURIComponent(providerId)}`, { query });
 
     return {
-      success: true,
-      data: parsedData,
-      source: provider.name || provider.apiUrl
+      success: result.success,
+      data: result.data,
+      error: result.error,
+      source: result.source || providerId,
     };
   } catch (error) {
     return {
       success: false,
       error: (error as Error).message,
-      source: provider.name || provider.apiUrl || 'Custom Provider'
+      source: providerId || 'Custom Provider'
     };
   }
 };

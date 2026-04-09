@@ -6,13 +6,38 @@ import { requireRole } from '../middleware/authorize.js';
 
 const router = Router();
 
+const canViewSensitiveSettings = (user) => ['super_admin', 'station_admin'].includes(String(user?.role || '').trim());
+
+const redactSensitiveSettings = (settings) => {
+  const next = { ...settings };
+  const appConfig = next.app_config && typeof next.app_config === 'object' ? { ...next.app_config } : null;
+
+  if (!appConfig || !appConfig.osint || typeof appConfig.osint !== 'object' || !Array.isArray(appConfig.osint.providers)) {
+    return next;
+  }
+
+  appConfig.osint = {
+    ...appConfig.osint,
+    providers: appConfig.osint.providers.map((provider) => {
+      if (!provider || typeof provider !== 'object') return provider;
+      return {
+        ...provider,
+        token: provider.token ? '********' : '',
+      };
+    }),
+  };
+
+  next.app_config = appConfig;
+  return next;
+};
+
 /* GET /api/settings — get all settings */
 router.get('/', authenticateToken, async (req, res) => {
   try {
     const result = await pool.query('SELECT key, value FROM app_settings ORDER BY key');
     const settings = {};
     result.rows.forEach(r => { settings[r.key] = r.value; });
-    res.json(settings);
+    res.json(canViewSensitiveSettings(req.user) ? settings : redactSensitiveSettings(settings));
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

@@ -6,12 +6,14 @@ import { ApiError } from '../../lib/apiClient'
 import { adminConsoleAPI } from '../lib/api'
 import { formatNumber, formatTimestamp, titleCase } from '../lib/format'
 import { OpsDataTable, OpsDefinitionList, OpsDrawerInspector, OpsMetricTile, OpsPageState, OpsSection, OpsStatusBadge, OpsSummaryStrip } from '../components/OpsPrimitives'
+import { useAdminLiveUpdates } from '../components/AdminLiveUpdatesProvider'
 import AdminRecentAuthDialog from '../components/AdminRecentAuthDialog'
 import type { AdminSessionRow, OfficerAdminUserRow } from '../types'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
 export default function AdminUsersRolesPage() {
+  const { isConnected } = useAdminLiveUpdates()
   const queryClient = useQueryClient()
   const [recentAuthOpen, setRecentAuthOpen] = useState(false)
   const [selectedSession, setSelectedSession] = useState<AdminSessionRow | null>(null)
@@ -20,13 +22,13 @@ export default function AdminUsersRolesPage() {
   const usersQuery = useQuery({
     queryKey: ['ops-users'],
     queryFn: () => adminConsoleAPI.getUsers(),
-    refetchInterval: 30000,
+    refetchInterval: isConnected ? false : 30000,
   })
 
   const sessionsQuery = useQuery({
     queryKey: ['ops-sessions'],
     queryFn: () => adminConsoleAPI.getSessions(true),
-    refetchInterval: 15000,
+    refetchInterval: isConnected ? false : 15000,
   })
 
   const forceLogoutMutation = useMutation({

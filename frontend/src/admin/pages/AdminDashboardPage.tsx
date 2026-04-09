@@ -7,40 +7,42 @@ import { adminConsoleAPI } from '../lib/api'
 import { adminPaths } from '../lib/paths'
 import { formatNumber, normalizeStatusTone, titleCase } from '../lib/format'
 import { OpsDataTable, OpsEntityChip, OpsMetricTile, OpsPageState, OpsSection, OpsStatusBadge, OpsSummaryStrip } from '../components/OpsPrimitives'
+import { useAdminLiveUpdates } from '../components/AdminLiveUpdatesProvider'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
 const chartColors = ['#8ab4ff', '#5f89ff', '#6f7a90', '#394255']
 
 export default function AdminDashboardPage() {
+  const { isConnected } = useAdminLiveUpdates()
   const observatoryQuery = useQuery({
     queryKey: ['admin-observatory'],
     queryFn: () => adminConsoleAPI.getObservatory(),
-    refetchInterval: 30000,
+    refetchInterval: isConnected ? false : 30000,
   })
   const alertsQuery = useQuery({
     queryKey: ['admin-alerts'],
     queryFn: () => adminConsoleAPI.getAlerts(),
-    refetchInterval: 30000,
+    refetchInterval: isConnected ? false : 30000,
   })
   const casesQuery = useQuery({
     queryKey: ['admin-dashboard-cases'],
     queryFn: () => adminConsoleAPI.getCases({ limit: 8 }),
-    refetchInterval: 30000,
+    refetchInterval: isConnected ? false : 30000,
   })
   const filesQuery = useQuery({
     queryKey: ['admin-dashboard-files'],
     queryFn: () => adminConsoleAPI.getFiles({ limit: 8 }),
-    refetchInterval: 30000,
+    refetchInterval: isConnected ? false : 30000,
   })
   const activityQuery = useQuery({
     queryKey: ['admin-dashboard-activity'],
     queryFn: () => adminConsoleAPI.getActivity({ limit: 12 }),
-    refetchInterval: 30000,
+    refetchInterval: isConnected ? false : 30000,
   })
   const analysisQuery = useQuery({
     queryKey: ['admin-dashboard-analysis'],
     queryFn: () => adminConsoleAPI.getAnalysis(),
-    refetchInterval: 30000,
+    refetchInterval: isConnected ? false : 30000,
   })
 
   const isLoading = observatoryQuery.isLoading || alertsQuery.isLoading || casesQuery.isLoading || filesQuery.isLoading || activityQuery.isLoading || analysisQuery.isLoading

@@ -2,11 +2,13 @@ import { lazy, Suspense, useEffect } from 'react'
 import { Navigate, Route, Routes } from 'react-router-dom'
 import RouteLoadingShell from '../components/RouteLoadingShell'
 import AdminProtectedRoute from './components/AdminProtectedRoute'
+import { AdminLiveUpdatesProvider } from './components/AdminLiveUpdatesProvider'
 import AdminLayout from './layout/AdminLayout'
 import { adminPaths } from './lib/paths'
 import { useAuthStore } from '../stores/authStore'
 
 const AdminLoginPage = lazy(() => import('./pages/AdminLoginPage'))
+const AdminForcePasswordChangePage = lazy(() => import('./pages/AdminForcePasswordChangePage'))
 const AdminDashboardPage = lazy(() => import('./pages/AdminDashboardPage'))
 const AdminCasesPage = lazy(() => import('./pages/AdminCasesPage'))
 const AdminCaseDetailPage = lazy(() => import('./pages/AdminCaseDetailPage'))
@@ -32,7 +34,14 @@ export default function AdminApp() {
         <Route path={adminPaths.login} element={<AdminLoginPage />} />
 
         <Route element={<AdminProtectedRoute />}>
-          <Route element={<AdminLayout />}>
+          <Route path={adminPaths.forcePasswordChange} element={<AdminForcePasswordChangePage />} />
+          <Route
+            element={
+              <AdminLiveUpdatesProvider>
+                <AdminLayout />
+              </AdminLiveUpdatesProvider>
+            }
+          >
             <Route path={adminPaths.home} element={<AdminDashboardPage />} />
             <Route path={adminPaths.cases} element={<AdminCasesPage />} />
             <Route path="/cases/:caseId" element={<AdminCaseDetailPage />} />

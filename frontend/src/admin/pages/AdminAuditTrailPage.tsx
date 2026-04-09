@@ -4,16 +4,18 @@ import { AlertTriangle } from 'lucide-react'
 import { adminConsoleAPI } from '../lib/api'
 import { formatNumber, formatTimestamp, titleCase } from '../lib/format'
 import { OpsDataTable, OpsDefinitionList, OpsDrawerInspector, OpsFilterBar, OpsMetricTile, OpsPageState, OpsSection, OpsStatusBadge, OpsSummaryStrip } from '../components/OpsPrimitives'
+import { useAdminLiveUpdates } from '../components/AdminLiveUpdatesProvider'
 import { Input } from '@/components/ui/input'
 
 export default function AdminAuditTrailPage() {
+  const { isConnected } = useAdminLiveUpdates()
   const [query, setQuery] = useState('')
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null)
 
   const activityQuery = useQuery({
     queryKey: ['ops-audit-trail', query],
     queryFn: () => adminConsoleAPI.getActivity({ q: query, limit: 40 }),
-    refetchInterval: 15000,
+    refetchInterval: isConnected ? false : 15000,
   })
 
   const selectedEvent = useMemo(

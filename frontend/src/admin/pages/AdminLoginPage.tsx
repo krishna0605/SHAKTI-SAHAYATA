@@ -25,7 +25,7 @@ export default function AdminLoginPage() {
 
   useEffect(() => {
     if (authStatus === 'authenticated' && admin) {
-      navigate(adminPaths.home, { replace: true })
+      navigate(admin.mustChangePassword ? adminPaths.forcePasswordChange : adminPaths.home, { replace: true })
     }
   }, [admin, authStatus, navigate])
 
@@ -37,7 +37,7 @@ export default function AdminLoginPage() {
     try {
       const data = await adminAuthAPI.loginWithTotp(email.trim().toLowerCase(), password, totpCode.trim())
       setAuth(data.accessToken, data.admin, data.session)
-      navigate(adminPaths.home, { replace: true })
+      navigate(data.admin.mustChangePassword ? adminPaths.forcePasswordChange : adminPaths.home, { replace: true })
     } catch (error: unknown) {
       setError(getErrorMessage(error))
     } finally {

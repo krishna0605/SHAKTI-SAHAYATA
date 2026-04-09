@@ -474,10 +474,19 @@ export const fetchAdminStorageWorkspace = async (query = {}) => {
         COUNT(*)::int AS total_files,
         COALESCE(SUM(COALESCE(uf.file_size, ij.file_size_bytes, 0)), 0)::bigint AS total_storage_bytes,
         COUNT(*) FILTER (WHERE uf.uploaded_at >= CURRENT_DATE)::int AS recent_uploads,
-        COUNT(*) FILTER (WHERE uf.case_id IS NULL)::int AS orphaned_files,
-        COUNT(*) FILTER (WHERE uf.parse_status = 'failed' OR ij.status IN ('failed', 'quarantined', 'mismatched'))::int AS flagged_files,
-        0::int AS retention_expiring_assets
+        COUNT(*) FILTER (WHERE COALESCE(gov.orphaned, uf.case_id IS NULL))::int AS orphaned_files,
+        COUNT(*) FILTER (
+          WHERE uf.parse_status = 'failed'
+             OR ij.status IN ('failed', 'quarantined', 'mismatched')
+             OR COALESCE(gov.quarantined, FALSE)
+             OR COALESCE(gov.legal_hold, FALSE)
+        )::int AS flagged_files,
+        COUNT(*) FILTER (
+          WHERE gov.retention_expires_at IS NOT NULL
+            AND gov.retention_expires_at <= NOW() + INTERVAL '14 days'
+        )::int AS retention_expiring_assets
       FROM uploaded_files uf
+      LEFT JOIN file_storage_governance gov ON gov.file_id = uf.id
       LEFT JOIN LATERAL (
         SELECT ij.*
         FROM ingestion_jobs ij
@@ -511,17 +520,18 @@ export const fetchAdminStorageWorkspace = async (query = {}) => {
           uploader.full_name AS uploaded_by,
           uf.uploaded_at,
           ij.file_checksum AS checksum,
-          CASE WHEN c.is_evidence_locked THEN 'Legal hold review' ELSE 'Active retention' END AS retention_status,
-          CASE WHEN ij.file_checksum IS NOT NULL THEN 'Storage integrity verified' ELSE 'Checksum unavailable' END AS integrity_status,
-          CASE WHEN ij.status = 'quarantined' THEN 'Quarantined' ELSE 'No malware signal' END AS malware_scan_status,
+          COALESCE(gov.retention_class, CASE WHEN c.is_evidence_locked THEN 'legal_hold_review' ELSE 'standard' END) AS retention_status,
+          COALESCE(gov.integrity_status, CASE WHEN ij.file_checksum IS NOT NULL THEN 'verified' ELSE 'unknown' END) AS integrity_status,
+          COALESCE(gov.malware_scan_status, CASE WHEN ij.status = 'quarantined' THEN 'quarantined' ELSE 'unknown' END) AS malware_scan_status,
           ij.id AS linked_job_id,
           ij.storage_path,
-          COALESCE(c.is_evidence_locked, FALSE) AS legal_hold,
-          CASE WHEN ij.status = 'quarantined' THEN TRUE ELSE FALSE END AS quarantined
+          COALESCE(gov.legal_hold, c.is_evidence_locked, FALSE) AS legal_hold,
+          COALESCE(gov.quarantined, CASE WHEN ij.status = 'quarantined' THEN TRUE ELSE FALSE END) AS quarantined
         FROM uploaded_files uf
         LEFT JOIN cases c ON c.id = uf.case_id
         LEFT JOIN users uploader ON uploader.id = uf.uploaded_by
         LEFT JOIN file_classifications fc ON fc.file_id = uf.id
+        LEFT JOIN file_storage_governance gov ON gov.file_id = uf.id
         LEFT JOIN LATERAL (
           SELECT ij.*
           FROM ingestion_jobs ij

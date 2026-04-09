@@ -162,6 +162,61 @@ CREATE INDEX IF NOT EXISTS idx_uploaded_files_case ON uploaded_files(case_id);
 CREATE INDEX IF NOT EXISTS idx_uploaded_files_type ON uploaded_files(file_type);
 
 -- ============================================================
+-- 007A: file_storage_governance — Evidence governance posture
+-- ============================================================
+CREATE TABLE IF NOT EXISTS file_storage_governance (
+    id                          SERIAL PRIMARY KEY,
+    file_id                     INTEGER NOT NULL UNIQUE REFERENCES uploaded_files(id) ON DELETE CASCADE,
+    integrity_status            VARCHAR(30) DEFAULT 'pending'
+                                CHECK (integrity_status IN ('pending', 'verified', 'failed', 'unknown')),
+    integrity_verified_at       TIMESTAMPTZ,
+    malware_scan_status         VARCHAR(30) DEFAULT 'pending'
+                                CHECK (malware_scan_status IN ('pending', 'clean', 'suspicious', 'quarantined', 'unknown')),
+    malware_scanned_at          TIMESTAMPTZ,
+    retention_class             VARCHAR(50) DEFAULT 'standard',
+    retention_expires_at        TIMESTAMPTZ,
+    legal_hold                  BOOLEAN DEFAULT FALSE,
+    legal_hold_reason           TEXT,
+    legal_hold_set_at           TIMESTAMPTZ,
+    legal_hold_set_by           INTEGER REFERENCES admin_accounts(id) ON DELETE SET NULL,
+    quarantined                 BOOLEAN DEFAULT FALSE,
+    quarantine_reason           TEXT,
+    quarantined_at              TIMESTAMPTZ,
+    quarantined_by              INTEGER REFERENCES admin_accounts(id) ON DELETE SET NULL,
+    orphaned                    BOOLEAN DEFAULT FALSE,
+    duplicate_of_file_id        INTEGER REFERENCES uploaded_files(id) ON DELETE SET NULL,
+    last_governance_action      VARCHAR(50),
+    last_governance_action_at   TIMESTAMPTZ,
+    last_governance_action_by   INTEGER REFERENCES admin_accounts(id) ON DELETE SET NULL,
+    created_at                  TIMESTAMPTZ DEFAULT NOW(),
+    updated_at                  TIMESTAMPTZ DEFAULT NOW()
+);
+ALTER TABLE file_storage_governance ADD COLUMN IF NOT EXISTS integrity_status VARCHAR(30) DEFAULT 'pending';
+ALTER TABLE file_storage_governance ADD COLUMN IF NOT EXISTS integrity_verified_at TIMESTAMPTZ;
+ALTER TABLE file_storage_governance ADD COLUMN IF NOT EXISTS malware_scan_status VARCHAR(30) DEFAULT 'pending';
+ALTER TABLE file_storage_governance ADD COLUMN IF NOT EXISTS malware_scanned_at TIMESTAMPTZ;
+ALTER TABLE file_storage_governance ADD COLUMN IF NOT EXISTS retention_class VARCHAR(50) DEFAULT 'standard';
+ALTER TABLE file_storage_governance ADD COLUMN IF NOT EXISTS retention_expires_at TIMESTAMPTZ;
+ALTER TABLE file_storage_governance ADD COLUMN IF NOT EXISTS legal_hold BOOLEAN DEFAULT FALSE;
+ALTER TABLE file_storage_governance ADD COLUMN IF NOT EXISTS legal_hold_reason TEXT;
+ALTER TABLE file_storage_governance ADD COLUMN IF NOT EXISTS legal_hold_set_at TIMESTAMPTZ;
+ALTER TABLE file_storage_governance ADD COLUMN IF NOT EXISTS legal_hold_set_by INTEGER REFERENCES admin_accounts(id) ON DELETE SET NULL;
+ALTER TABLE file_storage_governance ADD COLUMN IF NOT EXISTS quarantined BOOLEAN DEFAULT FALSE;
+ALTER TABLE file_storage_governance ADD COLUMN IF NOT EXISTS quarantine_reason TEXT;
+ALTER TABLE file_storage_governance ADD COLUMN IF NOT EXISTS quarantined_at TIMESTAMPTZ;
+ALTER TABLE file_storage_governance ADD COLUMN IF NOT EXISTS quarantined_by INTEGER REFERENCES admin_accounts(id) ON DELETE SET NULL;
+ALTER TABLE file_storage_governance ADD COLUMN IF NOT EXISTS orphaned BOOLEAN DEFAULT FALSE;
+ALTER TABLE file_storage_governance ADD COLUMN IF NOT EXISTS duplicate_of_file_id INTEGER REFERENCES uploaded_files(id) ON DELETE SET NULL;
+ALTER TABLE file_storage_governance ADD COLUMN IF NOT EXISTS last_governance_action VARCHAR(50);
+ALTER TABLE file_storage_governance ADD COLUMN IF NOT EXISTS last_governance_action_at TIMESTAMPTZ;
+ALTER TABLE file_storage_governance ADD COLUMN IF NOT EXISTS last_governance_action_by INTEGER REFERENCES admin_accounts(id) ON DELETE SET NULL;
+ALTER TABLE file_storage_governance ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
+ALTER TABLE file_storage_governance ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
+CREATE INDEX IF NOT EXISTS idx_file_storage_governance_file ON file_storage_governance(file_id);
+CREATE INDEX IF NOT EXISTS idx_file_storage_governance_quarantined ON file_storage_governance(quarantined);
+CREATE INDEX IF NOT EXISTS idx_file_storage_governance_legal_hold ON file_storage_governance(legal_hold);
+
+-- ============================================================
 -- 008: ingestion_jobs — Async pipeline (§41.3)
 -- ============================================================
 CREATE TABLE IF NOT EXISTS ingestion_jobs (
