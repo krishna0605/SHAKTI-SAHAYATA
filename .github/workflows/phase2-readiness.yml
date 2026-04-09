@@ -105,6 +105,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Build frontend for budget check
+        run: npm run build --workspace=frontend
+
       - name: Check bundle budget
         run: npm run bundle:check
 
@@ -211,7 +214,7 @@ jobs:
           VITE_API_URL: http://localhost:3001
 
       - name: Run main smoke tests
-        run: wait-on http-get://localhost:5173 http-get://localhost:3001/api/health && npx playwright test tests/e2e/smoke.spec.ts
+        run: npx wait-on http-get://localhost:5173 http-get://localhost:3001/api/health && npx playwright test tests/e2e/smoke.spec.ts
         env:
           PLAYWRIGHT_OFFICER_BUCKLE_ID: BK-1001
           DATABASE_URL: postgresql://shakti_admin:shakti_password@localhost:5434/shakti_test_db
@@ -316,7 +319,7 @@ jobs:
           VITE_MAIN_APP_URL: http://localhost:5173
 
       - name: Run admin smoke tests
-        run: wait-on http-get://localhost:4174 http-get://localhost:3001/api/health && npx playwright test tests/e2e/admin-smoke.spec.ts
+        run: npx wait-on http-get://localhost:4174 http-get://localhost:3001/api/health && npx playwright test tests/e2e/admin-smoke.spec.ts
 
       - name: Upload logs on failure
         if: failure()
