@@ -105,7 +105,7 @@
 
 @layer components {
   .ops-app-shell {
-    @apply h-screen overflow-hidden bg-[#090b0f] text-slate-100 lg:grid lg:grid-cols-[256px_1fr];
+    @apply min-h-screen overflow-hidden bg-[#090b0f] text-slate-100 lg:h-screen lg:grid lg:grid-cols-[256px_1fr];
   }
   .ops-sidebar {
     @apply h-screen min-w-0 overflow-hidden border-r border-white/10 bg-[#0b0d12] transition-[width,padding] duration-200 ease-out;
@@ -185,19 +185,19 @@
     @apply h-10 w-10 rounded-lg border border-white/10 bg-[#101725] text-slate-100 transition-[background-color,color,border-color,transform] duration-150 ease-out hover:-translate-y-px hover:border-white/15 hover:bg-[#131c2d] hover:text-white;
   }
   .ops-main-shell {
-    @apply min-w-0 h-screen overflow-hidden bg-[#090b0f];
+    @apply min-w-0 min-h-screen overflow-hidden bg-[#090b0f] lg:h-screen;
   }
   .ops-main-scroll {
     @apply h-full overflow-y-auto overflow-x-hidden;
   }
   .ops-topbar {
-    @apply sticky top-0 z-20 min-w-0 overflow-x-hidden border-b border-white/10 bg-[#0d1015] px-4 py-4 backdrop-blur-xl xl:px-6;
+    @apply sticky top-0 z-20 min-w-0 overflow-x-hidden border-b border-white/10 bg-[#0d1015] px-3 py-3 backdrop-blur-xl sm:px-4 xl:px-6;
   }
   .ops-page {
-    @apply min-w-0 space-y-5 overflow-x-hidden bg-[#090b0f] px-4 py-5 xl:px-6;
+    @apply min-w-0 space-y-5 overflow-x-hidden bg-[#090b0f] px-3 py-4 sm:px-4 xl:px-6;
   }
   .ops-panel {
-    @apply min-w-0 rounded-xl border border-white/10 bg-[#0f1218] p-4 transition-[border-color,background-color] duration-150 ease-out;
+    @apply min-w-0 rounded-xl border border-white/10 bg-[#0f1218] p-3 transition-[border-color,background-color] duration-150 ease-out sm:p-4;
   }
   .ops-panel-header {
     @apply mb-4 flex min-w-0 flex-col gap-2 xl:flex-row xl:items-start xl:justify-between;
@@ -266,7 +266,7 @@
     @apply min-w-0 w-full overflow-x-auto overflow-y-hidden rounded-lg border border-white/10 bg-[#0b0e14];
   }
   .ops-table {
-    @apply min-w-full table-fixed border-collapse text-sm;
+    @apply min-w-[720px] md:min-w-full table-fixed border-collapse text-sm;
   }
   .ops-table thead {
     @apply bg-[#12161d];

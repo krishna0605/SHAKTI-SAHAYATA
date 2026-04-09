@@ -117,7 +117,7 @@ export default function AdminDashboardPage() {
         <OpsMetricTile label="Active Users" value={formatNumber(summary.activeOfficerSessions + summary.activeAdminSessions)} detail="Current live session footprint." tone="info" />
       </OpsSummaryStrip>
 
-      <div className="grid min-w-0 gap-5 xl:grid-cols-[1.35fr_0.65fr]">
+      <div className="grid min-w-0 gap-5 xl:grid-cols-[1.2fr_0.8fr]">
         <OpsSection title="Operational feed" description="Recent operator activity, audit events, and system actions in one scan-first table.">
           <OpsDataTable
             columns={[
@@ -167,14 +167,14 @@ export default function AdminDashboardPage() {
       </div>
 
       <Tabs defaultValue="throughput" className="min-w-0 space-y-4">
-        <TabsList className="inline-flex h-auto w-auto flex-wrap justify-start rounded-lg border border-white/8 bg-[#0f1218] p-1">
-          <TabsTrigger value="throughput" className="rounded-md px-3 py-2">Throughput</TabsTrigger>
-          <TabsTrigger value="failures" className="rounded-md px-3 py-2">Failures</TabsTrigger>
-          <TabsTrigger value="usage" className="rounded-md px-3 py-2">Usage</TabsTrigger>
+        <TabsList className="flex h-auto w-full flex-wrap justify-start gap-1 rounded-lg border border-white/8 bg-[#0f1218] p-1">
+          <TabsTrigger value="throughput" className="flex-1 rounded-md px-3 py-2 sm:flex-none">Throughput</TabsTrigger>
+          <TabsTrigger value="failures" className="flex-1 rounded-md px-3 py-2 sm:flex-none">Failures</TabsTrigger>
+          <TabsTrigger value="usage" className="flex-1 rounded-md px-3 py-2 sm:flex-none">Usage</TabsTrigger>
         </TabsList>
 
         <TabsContent value="throughput" className="min-w-0">
-          <div className="grid min-w-0 gap-5 xl:grid-cols-2">
+          <div className="grid min-w-0 gap-5 lg:grid-cols-2">
             <OpsSection title="Case throughput" description="Recent case activity and linked upload movement.">
               <div className="h-64">
                 <ResponsiveContainer width="100%" height="100%">
@@ -207,7 +207,7 @@ export default function AdminDashboardPage() {
         </TabsContent>
 
         <TabsContent value="failures" className="min-w-0">
-          <div className="grid min-w-0 gap-5 xl:grid-cols-2">
+          <div className="grid min-w-0 gap-5 lg:grid-cols-2">
             <OpsSection title="Recent failed uploads" description="Latest uploads with parsing or validation issues." action={<Link to={adminPaths.ingestion} className="text-sm text-blue-300 hover:underline">Open ingestion</Link>}>
               <OpsDataTable
                 columns={[
@@ -243,7 +243,7 @@ export default function AdminDashboardPage() {
         </TabsContent>
 
         <TabsContent value="usage" className="min-w-0">
-          <div className="grid min-w-0 gap-5 xl:grid-cols-2">
+          <div className="grid min-w-0 gap-5 lg:grid-cols-2">
             <OpsSection title="Normalization distribution" description="Compact job status distribution across the current analysis snapshot.">
               <div className="h-64">
                 <ResponsiveContainer width="100%" height="100%">

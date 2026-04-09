@@ -1,4 +1,5 @@
 import pool from '../../config/database.js';
+import { buildLinkedIngestionJobLateral } from './adminLinkedIngestionJob.service.js';
 
 const DEFAULT_LIMIT = 30;
 const MAX_LIMIT = 100;
@@ -151,17 +152,7 @@ export const fetchAdminIngestionWorkspace = async (query = {}) => {
         LEFT JOIN cases c ON c.id = uf.case_id
         LEFT JOIN users uploader ON uploader.id = uf.uploaded_by
         LEFT JOIN file_classifications fc ON fc.file_id = uf.id
-        LEFT JOIN LATERAL (
-          SELECT ij.*
-          FROM ingestion_jobs ij
-          WHERE ij.case_id = uf.case_id
-            AND (
-              LOWER(ij.original_filename) = LOWER(COALESCE(uf.original_name, uf.file_name))
-              OR LOWER(ij.original_filename) = LOWER(uf.file_name)
-            )
-          ORDER BY ij.created_at DESC
-          LIMIT 1
-        ) latest_job ON TRUE
+        ${buildLinkedIngestionJobLateral('uf', 'latest_job')}
         LEFT JOIN LATERAL (
           SELECT COUNT(*)::int AS retry_count
           FROM ingestion_jobs ij_retry
@@ -356,17 +347,7 @@ export const fetchAdminNormalizationWorkspace = async (query = {}) => {
           ij.error_message
         FROM ingestion_jobs ij
         LEFT JOIN cases c ON c.id = ij.case_id
-        LEFT JOIN LATERAL (
-          SELECT uf.id
-          FROM uploaded_files uf
-          WHERE uf.case_id = ij.case_id
-            AND (
-              LOWER(COALESCE(uf.original_name, uf.file_name)) = LOWER(ij.original_filename)
-              OR LOWER(uf.file_name) = LOWER(ij.original_filename)
-            )
-          ORDER BY uf.uploaded_at DESC
-          LIMIT 1
-        ) uf ON TRUE
+        LEFT JOIN uploaded_files uf ON uf.id = ij.file_id
         ${search.whereSql}
         ORDER BY COALESCE(ij.started_at, ij.created_at) DESC
         LIMIT $${search.params.length + 1}
@@ -487,17 +468,7 @@ export const fetchAdminStorageWorkspace = async (query = {}) => {
         )::int AS retention_expiring_assets
       FROM uploaded_files uf
       LEFT JOIN file_storage_governance gov ON gov.file_id = uf.id
-      LEFT JOIN LATERAL (
-        SELECT ij.*
-        FROM ingestion_jobs ij
-        WHERE ij.case_id = uf.case_id
-          AND (
-            LOWER(ij.original_filename) = LOWER(COALESCE(uf.original_name, uf.file_name))
-            OR LOWER(ij.original_filename) = LOWER(uf.file_name)
-          )
-        ORDER BY ij.created_at DESC
-        LIMIT 1
-      ) ij ON TRUE
+      ${buildLinkedIngestionJobLateral('uf', 'ij')}
     `),
     pool.query(`
       SELECT COALESCE(fc.detected_type, fc.expected_type, uf.file_type, 'unknown') AS label, COUNT(*)::int AS value
@@ -532,17 +503,7 @@ export const fetchAdminStorageWorkspace = async (query = {}) => {
         LEFT JOIN users uploader ON uploader.id = uf.uploaded_by
         LEFT JOIN file_classifications fc ON fc.file_id = uf.id
         LEFT JOIN file_storage_governance gov ON gov.file_id = uf.id
-        LEFT JOIN LATERAL (
-          SELECT ij.*
-          FROM ingestion_jobs ij
-          WHERE ij.case_id = uf.case_id
-            AND (
-              LOWER(ij.original_filename) = LOWER(COALESCE(uf.original_name, uf.file_name))
-              OR LOWER(ij.original_filename) = LOWER(uf.file_name)
-            )
-          ORDER BY ij.created_at DESC
-          LIMIT 1
-        ) ij ON TRUE
+        ${buildLinkedIngestionJobLateral('uf', 'ij')}
         ${search.whereSql}
         ORDER BY uf.uploaded_at DESC
         LIMIT $${search.params.length + 1}

@@ -1,4 +1,5 @@
 import pool from '../../config/database.js';
+import { buildLinkedIngestionJobLateral } from './adminLinkedIngestionJob.service.js';
 
 const GOVERNANCE_ACTIONS = new Set([
   'place_legal_hold',
@@ -98,17 +99,7 @@ const fetchAssetRecord = async (fileId) => {
       LEFT JOIN cases c ON c.id = uf.case_id
       LEFT JOIN users uploader ON uploader.id = uf.uploaded_by
       LEFT JOIN file_classifications fc ON fc.file_id = uf.id
-      LEFT JOIN LATERAL (
-        SELECT ij.*
-        FROM ingestion_jobs ij
-        WHERE ij.case_id = uf.case_id
-          AND (
-            LOWER(ij.original_filename) = LOWER(COALESCE(uf.original_name, uf.file_name))
-            OR LOWER(ij.original_filename) = LOWER(uf.file_name)
-          )
-        ORDER BY ij.created_at DESC
-        LIMIT 1
-      ) ij ON TRUE
+      ${buildLinkedIngestionJobLateral('uf', 'ij')}
       LEFT JOIN file_storage_governance gov ON gov.file_id = uf.id
       WHERE uf.id = $1
       LIMIT 1

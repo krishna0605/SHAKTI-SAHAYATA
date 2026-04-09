@@ -222,6 +222,7 @@ CREATE INDEX IF NOT EXISTS idx_file_storage_governance_legal_hold ON file_storag
 CREATE TABLE IF NOT EXISTS ingestion_jobs (
     id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     case_id             INTEGER NOT NULL REFERENCES cases(id),
+    file_id             INTEGER REFERENCES uploaded_files(id) ON DELETE SET NULL,
     user_id             INTEGER NOT NULL REFERENCES users(id),
     original_filename   VARCHAR(500) NOT NULL,
     storage_path        VARCHAR(500) NOT NULL,
@@ -249,7 +250,9 @@ CREATE TABLE IF NOT EXISTS ingestion_jobs (
     reviewed_by         INTEGER REFERENCES users(id),
     CONSTRAINT unique_file_per_case UNIQUE (case_id, file_checksum)
 );
+ALTER TABLE ingestion_jobs ADD COLUMN IF NOT EXISTS file_id INTEGER REFERENCES uploaded_files(id) ON DELETE SET NULL;
 CREATE INDEX IF NOT EXISTS idx_jobs_case ON ingestion_jobs(case_id);
+CREATE INDEX IF NOT EXISTS idx_jobs_file ON ingestion_jobs(file_id);
 CREATE INDEX IF NOT EXISTS idx_jobs_status ON ingestion_jobs(status);
 CREATE INDEX IF NOT EXISTS idx_jobs_checksum ON ingestion_jobs(file_checksum);
 CREATE INDEX IF NOT EXISTS idx_jobs_user ON ingestion_jobs(user_id);

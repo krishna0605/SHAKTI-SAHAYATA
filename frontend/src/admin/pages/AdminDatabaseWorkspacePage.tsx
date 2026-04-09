@@ -159,11 +159,11 @@ export default function AdminDatabaseWorkspacePage() {
       </OpsSummaryStrip>
 
       <Tabs value={activeTab} onValueChange={(value: string) => setSearchParams({ tab: value })} className="min-w-0 space-y-4">
-        <TabsList className="flex h-auto w-full flex-wrap justify-start rounded-lg border border-white/8 bg-[#0f1218] p-1">
-          <TabsTrigger value="schema" className="rounded-md px-3 py-2">Schema Visualizer</TabsTrigger>
-          <TabsTrigger value="storage" className="rounded-md px-3 py-2">Storage</TabsTrigger>
-          <TabsTrigger value="observability" className="rounded-md px-3 py-2">Observability</TabsTrigger>
-          <TabsTrigger value="logs" className="rounded-md px-3 py-2">Logs</TabsTrigger>
+        <TabsList className="flex h-auto w-full flex-wrap justify-start gap-1 rounded-lg border border-white/8 bg-[#0f1218] p-1">
+          <TabsTrigger value="schema" className="flex-1 rounded-md px-3 py-2 sm:flex-none">Schema Visualizer</TabsTrigger>
+          <TabsTrigger value="storage" className="flex-1 rounded-md px-3 py-2 sm:flex-none">Storage</TabsTrigger>
+          <TabsTrigger value="observability" className="flex-1 rounded-md px-3 py-2 sm:flex-none">Observability</TabsTrigger>
+          <TabsTrigger value="logs" className="flex-1 rounded-md px-3 py-2 sm:flex-none">Logs</TabsTrigger>
         </TabsList>
 
         <TabsContent value="schema" className="space-y-4">
@@ -182,7 +182,7 @@ export default function AdminDatabaseWorkspacePage() {
                 value={schemaSearch}
                 onChange={(event) => setSchemaSearch(event.target.value)}
                 placeholder="Search tables"
-                className="h-9 rounded-lg border-white/10 bg-white/[0.03] pl-9"
+                className="h-9 w-full rounded-lg border-white/10 bg-white/[0.03] pl-9"
               />
             </div>
             <OpsStatusBadge label={`${formatNumber(filteredSchema.summary.tableCount)} shown`} tone="info" />
@@ -243,7 +243,7 @@ export default function AdminDatabaseWorkspacePage() {
 
         <TabsContent value="storage" className="space-y-4">
           <OpsToolbar title="Storage filters">
-            <Input placeholder="Search file, case, uploader, hash" className="h-9 max-w-sm rounded-lg border-white/10 bg-white/[0.03]" />
+            <Input placeholder="Search file, case, uploader, hash" className="h-9 w-full sm:max-w-sm rounded-lg border-white/10 bg-white/[0.03]" />
             <OpsStatusBadge label={`${formatNumber(storageQuery.data.summary.orphanedFiles)} orphaned`} tone={storageQuery.data.summary.orphanedFiles > 0 ? 'warning' : 'success'} />
             <OpsStatusBadge label={`${formatNumber(storageQuery.data.summary.flaggedFiles)} flagged`} tone={storageQuery.data.summary.flaggedFiles > 0 ? 'danger' : 'neutral'} />
           </OpsToolbar>
@@ -434,7 +434,7 @@ export default function AdminDatabaseWorkspacePage() {
 
         <TabsContent value="logs" className="space-y-4">
           <OpsToolbar title="Log filters">
-            <Input placeholder="Search service, action, trace, case, or session" className="h-9 max-w-sm rounded-lg border-white/10 bg-white/[0.03]" />
+            <Input placeholder="Search service, action, trace, case, or session" className="h-9 w-full sm:max-w-sm rounded-lg border-white/10 bg-white/[0.03]" />
             <OpsStatusBadge label="Latest 40 events" tone="info" />
           </OpsToolbar>
 

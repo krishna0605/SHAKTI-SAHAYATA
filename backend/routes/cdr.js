@@ -3,6 +3,7 @@ import { Router } from 'express';
 import pool from '../config/database.js';
 import { authenticateToken } from '../middleware/auth.js';
 import { combineDateAndTime, normalizeDateString, normalizeTimeString } from '../utils/timestamps.js';
+import { emitAdminConsoleEvent } from '../services/admin/adminEventStream.service.js';
 
 const router = Router();
 
@@ -22,6 +23,13 @@ const updateUploadedFileProgress = async (fileId, inserted) => {
      WHERE id = $1`,
     [parsedFileId, inserted]
   );
+};
+
+const emitIngestionCompletionEvents = (payload = {}) => {
+  emitAdminConsoleEvent('dashboard.summary.changed', payload);
+  emitAdminConsoleEvent('ingestion.queue.changed', payload);
+  emitAdminConsoleEvent('normalization.queue.changed', payload);
+  emitAdminConsoleEvent('storage.changed', payload);
 };
 
 const normalizeRawData = (value) => (value && typeof value === 'object' && !Array.isArray(value) ? value : {});
@@ -155,6 +163,7 @@ router.post('/records', authenticateToken, async (req, res) => {
       inserted += batch.length;
     }
     await updateUploadedFileProgress(fileId, inserted);
+    emitIngestionCompletionEvents({ caseId: parsedCaseId, fileId: toInt(fileId), inserted, module: 'cdr' });
     res.json({ inserted });
   } catch (error) {
     res.status(500).json({ error: error.message });

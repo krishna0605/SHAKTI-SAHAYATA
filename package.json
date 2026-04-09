@@ -22,6 +22,7 @@
     "db:init": "cd database && psql -U shakti_admin -d shakti_db -f schema.sql",
     "db:seed": "echo seed.sql is deprecated; use npm run db:bootstrap-identities",
     "db:bootstrap-identities": "node scripts/bootstrap-identities.mjs",
+    "db:refresh-telecom": "node scripts/refresh-telecom-data.mjs",
     "db:reset": "npm run db:init && npm run db:bootstrap-identities",
     "backup": "node scripts/backup.mjs",
     "restore": "node scripts/restore.mjs",

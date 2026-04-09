@@ -2,6 +2,7 @@ import pool from './database.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { buildBackfillIngestionJobLinksSql } from '../services/admin/adminLinkedIngestionJob.service.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -105,6 +106,14 @@ const ensureOsintTable = async () => {
   }
 };
 
+const backfillIngestionJobLinks = async () => {
+  try {
+    await pool.query(buildBackfillIngestionJobLinksSql());
+  } catch (err) {
+    console.warn('[initDb] ⚠️  ingestion job link backfill warning:', err.message);
+  }
+};
+
 /**
  * Initialize the database on backend startup.
  * - If tables are missing, apply schema.sql
@@ -134,6 +143,7 @@ export const initializeDatabase = async () => {
 
   // Always ensure OSINT table exists (Phase 6 addition)
   await ensureOsintTable();
+  await backfillIngestionJobLinks();
 };
 
 export default initializeDatabase;

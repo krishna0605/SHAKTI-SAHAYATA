@@ -6,6 +6,7 @@ import pool from '../config/database.js';
 import { authenticateToken } from '../middleware/auth.js';
 import { upload, handleUploadError } from '../middleware/upload.js';
 import { classifyFile, extractHeadersFromFile } from '../services/fileClassifier.js';
+import { emitAdminConsoleEvent } from '../services/admin/adminEventStream.service.js';
 
 const router = Router();
 const __filename = fileURLToPath(import.meta.url);
@@ -89,6 +90,13 @@ const insertAuditLog = async ({ user, fileId, action = 'FILE_UPLOAD', details })
       JSON.stringify(details)
     ]
   );
+};
+
+const emitFileLifecycleEvents = (eventPayload = {}) => {
+  emitAdminConsoleEvent('dashboard.summary.changed', eventPayload);
+  emitAdminConsoleEvent('ingestion.queue.changed', eventPayload);
+  emitAdminConsoleEvent('storage.changed', eventPayload);
+  emitAdminConsoleEvent('logs.changed', eventPayload);
 };
 
 const listFilesForCase = async (caseId) => {
@@ -240,6 +248,12 @@ router.post('/upload/:type?', upload.single('file'), handleUploadError, async (r
     });
 
     const payload = buildFileResponse(fileRecord, classification);
+    emitFileLifecycleEvents({
+      fileId: fileRecord.id,
+      caseId,
+      action: 'uploaded',
+      classificationResult: classification.result,
+    });
     res.status(classification.result === 'ACCEPTED' ? 201 : 400).json({
       ...payload,
       file: payload,
@@ -378,6 +392,12 @@ router.delete('/:fileId', async (req, res) => {
     }
 
     removeUploadedFile(path.join(uploadDir, fileRecord.file_name));
+
+    emitFileLifecycleEvents({
+      fileId,
+      caseId: fileRecord.case_id,
+      action: 'deleted',
+    });
 
     return res.json({
       fileId,

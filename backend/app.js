@@ -26,6 +26,7 @@ import officerRoutes from './routes/officerImport.js';
 import chatbotRoutes from './routes/chatbot.js';
 import osintRoutes from './routes/osint.js';
 import systemRoutes from './routes/system.js';
+import graphqlRoutes from './routes/graphql.js';
 import adminAuthRoutes from './routes/admin/auth.js';
 import adminConsoleRoutes from './routes/admin/console.js';
 import adminOperationsRoutes from './routes/admin/operations.js';
@@ -117,6 +118,7 @@ export const createApp = () => {
   app.use('/api/chatbot', chatbotRoutes);
   app.use('/api/osint', rateLimit, osintRoutes);
   app.use('/api/system', rateLimit, systemRoutes);
+  app.use('/graphql', rateLimit, graphqlRoutes);
   app.post('/api/reset-settings', (_req, res) => {
     res.json({ success: true, message: 'Legacy reset endpoint is available. No destructive reset was performed.' });
   });

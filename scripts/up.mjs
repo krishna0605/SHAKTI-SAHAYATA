@@ -3,8 +3,11 @@ import { mkdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const composeArgs = ['compose', '-f', 'docker-compose.yml', '-f', 'docker-compose.dev.yml'];
+const composeArgs = ['compose', '--profile', 'observability', '-f', 'docker-compose.yml', '-f', 'docker-compose.dev.yml'];
 const backendHealthUrl = 'http://localhost:3001/api/health';
+const graphqlUrl = 'http://localhost:3001/graphql';
+const prometheusUrl = 'http://localhost:9090';
+const grafanaUrl = 'http://localhost:3002';
 const hostOllamaUrl = (process.env.OLLAMA_BASE_URL || 'http://localhost:11434').replace(/\/$/, '');
 const ollamaModel = process.env.OLLAMA_MODEL || 'phi3.5';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -12,26 +15,6 @@ const repoRoot = path.resolve(__dirname, '..');
 const runtimeDir = path.join(repoRoot, 'ops', 'runtime');
 const backupStatusPath = path.join(runtimeDir, 'backup-status.json');
 const restoreStatusPath = path.join(runtimeDir, 'restore-status.json');
-
-const credentialsMessage = `
-SHAKTI dev stack is starting.
-
-No default reusable credentials are shipped with this stack.
-
-To create baseline identities:
-- run schema setup
-- export BOOTSTRAP_ADMIN_PASSWORD with a strong runtime-only secret
-- run: npm run db:bootstrap-identities
-
-The controlled officer roster will be loaded from database/bootstrap/officers-bootstrap.sql
-and the bootstrap admin will be created from your runtime environment.
-
-Frontend: http://localhost:5173
-Admin:    http://localhost:4174
-Backend:  http://localhost:3001/api/health
-AI:       optional future service (not started by default)
-Ollama:   ${hostOllamaUrl}
-`.trim();
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -48,7 +31,6 @@ const runCommand = (command, args, options = {}) =>
   new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       stdio: 'inherit',
-      shell: true,
       ...options
     });
 
@@ -69,6 +51,22 @@ const waitForBackend = async (timeoutMs = 180000) => {
     try {
       const response = await fetch(backendHealthUrl);
       if (response.ok) return true;
+    } catch {
+      // keep waiting
+    }
+    await sleep(3000);
+  }
+
+  return false;
+};
+
+const waitForHttp = async (url, { timeoutMs = 120000, init = {}, validate = (response) => response.ok } = {}) => {
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt < timeoutMs) {
+    try {
+      const response = await fetch(url, init);
+      if (await validate(response)) return true;
     } catch {
       // keep waiting
     }
@@ -159,13 +157,35 @@ const main = async () => {
   console.log('\n[up] Starting SHAKTI development stack with Docker (host Ollama mode)...\n');
   await runCommand('docker', [...composeArgs, 'up', '--build', '-d']);
 
-  console.log('\n[up] Waiting for backend health check...\n');
+  console.log('\n[up] Waiting for backend, GraphQL, Prometheus, and Grafana readiness...\n');
   const backendReady = await waitForBackend();
+  const [graphqlReady, prometheusReady, grafanaReady] = await Promise.all([
+    waitForHttp(graphqlUrl, {
+      init: {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: '{ health { status } }' }),
+      },
+      validate: (response) => response.ok,
+    }),
+    waitForHttp(`${prometheusUrl}/-/ready`),
+    waitForHttp(`${grafanaUrl}/api/health`, {
+      validate: async (response) => {
+        if (!response.ok) return false;
+        const payload = await response.json().catch(() => null);
+        return payload?.database === 'ok';
+      },
+    }),
+  ]);
+
   if (!backendReady) {
     console.warn('[up] Backend did not become healthy within the expected time window.');
   } else {
     console.log('[up] Backend is reachable. Controlled bootstrap identity checks passed through startup readiness.');
   }
+  console.log(`[up] GraphQL endpoint: ${graphqlReady ? 'ready' : 'not ready yet'}`);
+  console.log(`[up] Prometheus: ${prometheusReady ? 'ready' : 'not ready yet'}`);
+  console.log(`[up] Grafana: ${grafanaReady ? 'ready' : 'not ready yet'}`);
 
   const [backupStatus, restoreStatus] = await Promise.all([
     readJson(backupStatusPath),
@@ -183,6 +203,29 @@ const main = async () => {
   } else {
     console.log('[up] Latest restore drill: not recorded yet');
   }
+
+  const credentialsMessage = `
+SHAKTI dev stack is starting.
+
+No default reusable credentials are shipped with this stack.
+
+To create baseline identities:
+- run schema setup
+- export BOOTSTRAP_ADMIN_PASSWORD with a strong runtime-only secret
+- run: npm run db:bootstrap-identities
+
+The controlled officer roster will be loaded from database/bootstrap/officers-bootstrap.sql
+and the bootstrap admin will be created from your runtime environment.
+
+Frontend:    http://localhost:5173
+Admin:       http://localhost:4174
+Backend:     ${backendHealthUrl}
+GraphQL:     ${graphqlUrl}
+Prometheus:  ${prometheusUrl}
+Grafana:     ${grafanaUrl}
+AI:          optional future service (not started by default)
+Ollama:      ${hostOllamaUrl}
+`.trim();
 
   console.log(`\n${credentialsMessage}\n`);
 };
