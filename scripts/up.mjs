@@ -16,9 +16,15 @@ const restoreStatusPath = path.join(runtimeDir, 'restore-status.json');
 const credentialsMessage = `
 SHAKTI dev stack is starting.
 
-Default seeded users verified during backend startup:
-- BK-4782 / rajesh@police.gov.in / Shakti@123
-- BK-9999 / admin@police.gov.in / Shakti@123
+No default reusable credentials are shipped with this stack.
+
+To create baseline identities:
+- run schema setup
+- export BOOTSTRAP_ADMIN_PASSWORD with a strong runtime-only secret
+- run: npm run db:bootstrap-identities
+
+The controlled officer roster will be loaded from database/bootstrap/officers-bootstrap.sql
+and the bootstrap admin will be created from your runtime environment.
 
 Frontend: http://localhost:5173
 Admin:    http://localhost:4174
@@ -158,7 +164,7 @@ const main = async () => {
   if (!backendReady) {
     console.warn('[up] Backend did not become healthy within the expected time window.');
   } else {
-    console.log('[up] Backend is reachable. Seed users were verified during startup.');
+    console.log('[up] Backend is reachable. Controlled bootstrap identity checks passed through startup readiness.');
   }
 
   const [backupStatus, restoreStatus] = await Promise.all([

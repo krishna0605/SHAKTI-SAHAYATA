@@ -104,7 +104,7 @@ This helper:
 - ensures the configured model exists locally
 - starts PostgreSQL, backend, and frontend via Docker Compose
 - waits for backend health checks
-- prints seeded local credentials
+- starts with a clean operational dataset
 
 ### 4. Open the app
 
@@ -147,7 +147,14 @@ You need a PostgreSQL 15-compatible database configured with the values from `.e
 
 ```powershell
 npm run db:init
-npm run db:seed
+npm run db:bootstrap-identities
+```
+
+Before running the bootstrap command, provide a strong runtime-only admin password:
+
+```powershell
+$env:BOOTSTRAP_ADMIN_PASSWORD = "replace-with-a-strong-secret"
+npm run db:bootstrap-identities
 ```
 
 ### 4. Start the services
@@ -172,14 +179,14 @@ Or start all three together:
 npm run dev
 ```
 
-## Default Local Login Credentials
+## Identity Bootstrap Model
 
-The development seed creates these users:
+This repository no longer ships reusable default login credentials for local development.
 
-- `BK-4782` / `rajesh@police.gov.in` / `Shakti@123`
-- `BK-9999` / `admin@police.gov.in` / `Shakti@123`
-
-These credentials come from the local development seed in [database/seed.sql](./database/seed.sql). Change them for any shared or non-local environment.
+- officer baseline identities are created through [database/bootstrap/officers-bootstrap.sql](./database/bootstrap/officers-bootstrap.sql)
+- the admin account is created only through `npm run db:bootstrap-identities`
+- the admin password must be supplied at runtime through `BOOTSTRAP_ADMIN_PASSWORD`
+- operational data such as cases, uploads, alerts, and audit history is intentionally not seeded
 
 ## Common Commands
 

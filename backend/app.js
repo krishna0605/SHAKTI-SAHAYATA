@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { adminAuthRateLimit, authRateLimit, rateLimit } from './middleware/rateLimit.js';
 import { auditLogger } from './middleware/auditLogger.js';
 import { globalErrorHandler } from './middleware/errorHandler.js';
+import { metricsHandler, metricsMiddleware } from './services/metrics.service.js';
 import { getLiveHealth, getReadyHealth, getStartupStatus } from './services/runtimeStatus.service.js';
 
 import authRoutes from './routes/auth.js';
@@ -66,6 +67,8 @@ export const createApp = () => {
   app.use(express.json({ limit: '50mb' }));
   app.use(express.urlencoded({ extended: true, limit: '50mb' }));
   app.use(cookieParser());
+  app.use(metricsMiddleware);
+  app.get('/metrics', metricsHandler);
   app.use(auditLogger);
   app.use('/uploads', express.static(uploadDir));
 

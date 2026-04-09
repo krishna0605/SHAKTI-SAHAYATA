@@ -1,6 +1,6 @@
 // OSINT API Handler — SHAKTI v2.0
-// All OSINT lookups run client-side or through the backend crawler.
-// No cloud services. On-premise only.
+// All operator-facing OSINT results must come from real backend/on-prem providers.
+// If a provider is not configured, the API returns an explicit unavailable state.
 import { apiClient, getAccessToken } from './apiClient';
 
 export interface OSINTApiResult {
@@ -30,6 +30,13 @@ export interface CrawlResult {
   source: string;
 }
 
+interface BackendLookupResult {
+  success: boolean;
+  data?: unknown;
+  error?: string;
+  source?: string;
+}
+
 /* ─── Resolve backend URL ─── */
 const resolveBaseUrl = () => {
   const envUrl = import.meta.env.VITE_API_URL?.trim();
@@ -50,6 +57,45 @@ const resolveBaseUrl = () => {
 };
 
 const BASE_URL = resolveBaseUrl();
+
+const postBackendLookup = async (endpoint: string, body: Record<string, unknown>): Promise<BackendLookupResult> => {
+  const makeRequest = () => {
+    const token = getAccessToken();
+    return fetch(`${BASE_URL}${endpoint}`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify(body),
+    });
+  };
+
+  let response = await makeRequest();
+  if (response.status === 401 && await apiClient.refreshAccessToken(false)) {
+    response = await makeRequest();
+  }
+
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    return {
+      success: false,
+      error:
+        typeof payload?.error === 'string'
+          ? payload.error
+          : `Request failed with status ${response.status}`,
+      source: typeof payload?.source === 'string' ? payload.source : 'SHAKTI backend',
+    };
+  }
+
+  return {
+    success: Boolean(payload?.success ?? true),
+    data: payload?.data,
+    error: typeof payload?.error === 'string' ? payload.error : undefined,
+    source: typeof payload?.source === 'string' ? payload.source : 'SHAKTI backend',
+  };
+};
 
 /* ─── RDAP helper ─── */
 const getRegistrar = (entities?: Array<{ vcardArray?: unknown }>): string => {
@@ -182,31 +228,19 @@ export const fetchIPDetails = async (ip: string): Promise<OSINTApiResult> => {
   }
 };
 
-/* ─── 2. Phone Number Validation (Simulated for on-premise) ─── */
+/* ─── 2. Phone Number Validation (Backend/on-prem only) ─── */
 export const fetchPhoneDetails = async (number: string): Promise<OSINTApiResult> => {
-  await new Promise(resolve => setTimeout(resolve, 800));
-  
-  const isIndian = number.startsWith('+91') || number.startsWith('91') || (number.length === 10 && /^[6-9]/.test(number));
-  
-  if (number.length < 10) {
+  const trimmed = number.trim();
+  if (trimmed.length < 10) {
     return { success: false, error: 'Invalid phone number format', source: 'Validation Logic' };
   }
 
+  const result = await postBackendLookup('/api/osint/phone', { query: trimmed });
   return {
-    success: true,
-    data: {
-      valid: true,
-      number: number,
-      local_format: number.slice(-10),
-      international_format: number.startsWith('+') ? number : `+91${number.slice(-10)}`,
-      country_prefix: "+91",
-      country_code: "IN",
-      country_name: "India",
-      location: isIndian ? "Gujarat (Circle Estimate)" : "Unknown",
-      carrier: "Reliance Jio Infocomm Ltd (Simulated)",
-      line_type: "mobile"
-    },
-    source: 'NumVerify (Simulated)'
+    success: result.success,
+    data: result.data,
+    error: result.error,
+    source: result.source || 'Phone lookup provider',
   };
 };
 
@@ -241,25 +275,18 @@ export const fetchDomainDetails = async (domain: string): Promise<OSINTApiResult
   }
 };
 
-/* ─── 4. Data Breach Check (Simulated) ─── */
+/* ─── 4. Data Breach Check (Backend/on-prem only) ─── */
 export const checkBreach = async (query: string): Promise<OSINTApiResult> => {
-  await new Promise(resolve => setTimeout(resolve, 1000));
-  
-  const mockBreaches = [
-    { name: "LinkedIn", date: "2021-06", count: 700000000, description: "Scraped data including emails and phone numbers" },
-    { name: "BigBasket", date: "2020-11", count: 20000000, description: "Customer details and addresses" },
-    { name: "Domino's India", date: "2021-04", count: 180000000, description: "Order details and phone numbers" }
-  ];
+  const trimmed = query.trim();
+  if (!trimmed) {
+    return { success: false, error: 'Query is required', source: 'Breach lookup provider' };
+  }
 
-  const foundBreaches = mockBreaches.filter((_, i) => (query.length + i) % 2 === 0);
-
+  const result = await postBackendLookup('/api/osint/breach', { query: trimmed });
   return {
-    success: true,
-    data: {
-      found: foundBreaches.length > 0,
-      breach_count: foundBreaches.length,
-      breaches: foundBreaches
-    },
-    source: 'Breach Database (Simulated)'
+    success: result.success,
+    data: result.data,
+    error: result.error,
+    source: result.source || 'Breach lookup provider',
   };
 };

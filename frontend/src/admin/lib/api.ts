@@ -88,6 +88,13 @@ export const adminAuthAPI = {
       body: { password, totpCode },
     })
   },
+
+  async changePassword(currentPassword: string, newPassword: string, totpCode?: string) {
+    return adminApiClient.request<{ message: string }>('/auth/change-password', {
+      method: 'POST',
+      body: { currentPassword, newPassword, totpCode },
+    })
+  },
 }
 
 const buildSearchParams = (params: Record<string, string | number | boolean | undefined | null>) => {

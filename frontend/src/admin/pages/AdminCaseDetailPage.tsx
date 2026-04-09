@@ -5,7 +5,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { adminConsoleAPI } from '../lib/api'
 import { formatNumber, formatTimestamp, normalizeStatusTone, titleCase } from '../lib/format'
 import { adminPaths } from '../lib/paths'
-import { OpsDefinitionList, OpsEntityChip, OpsInspector, OpsMetricTile, OpsPageState, OpsSection, OpsStatusBadge, OpsTimeline } from '../components/OpsPrimitives'
+import { OpsDefinitionList, OpsEntityChip, OpsMetricTile, OpsPageState, OpsSection, OpsStatusBadge, OpsTimeline } from '../components/OpsPrimitives'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
@@ -45,7 +45,7 @@ export default function AdminCaseDetailPage() {
   const caseItem = payload.case
 
   return (
-    <div className="space-y-6">
+    <div className="min-w-0 space-y-6">
       <div className="flex flex-wrap items-center gap-3">
         <Button type="button" variant="ghost" className="rounded-xl" onClick={() => navigate(adminPaths.cases)}>
           <ArrowLeft className="h-4 w-4" />
@@ -64,7 +64,7 @@ export default function AdminCaseDetailPage() {
         <OpsMetricTile label="Timeline Events" value={formatNumber(payload.timelineSummary.totalEvents)} detail={`${payload.timelineSummary.highRiskEvents} high-risk events`} tone={payload.timelineSummary.highRiskEvents > 0 ? 'warning' : 'success'} />
       </section>
 
-      <div className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
+      <div className="grid min-w-0 gap-6 xl:grid-cols-[1.2fr_0.8fr]">
         <OpsSection title={caseItem.case_name} description={caseItem.description || 'Investigation detail workspace with uploads, processing, linked entities, and audit context.'}>
           <Tabs value={tab} onValueChange={setTab} className="space-y-5">
             <TabsList className="flex h-auto flex-wrap justify-start rounded-xl border border-border/70 bg-card/80 p-1">
@@ -200,7 +200,7 @@ export default function AdminCaseDetailPage() {
           </Tabs>
         </OpsSection>
 
-        <OpsInspector title="Context Panel" subtitle="Linked objects, quick actions, and supervisory context.">
+        <OpsSection title="Context Panel" description="Linked objects, quick actions, and supervisory context." className="self-start">
           <div className="space-y-5">
             <OpsDefinitionList
               items={[
@@ -237,7 +237,7 @@ export default function AdminCaseDetailPage() {
               </Link>
             </Button>
           </div>
-        </OpsInspector>
+        </OpsSection>
       </div>
     </div>
   )

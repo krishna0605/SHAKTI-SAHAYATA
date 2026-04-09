@@ -3,6 +3,8 @@ import { AlertTriangle, ChevronRight, ShieldAlert } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { ScrollArea } from '@/components/ui/scroll-area'
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { cn } from '@/lib/utils'
 
 export function OpsPageState({
@@ -10,18 +12,22 @@ export function OpsPageState({
   title,
   description,
   action,
+  compact = false,
+  className,
 }: {
   icon?: ReactNode
   title: string
   description: string
   action?: ReactNode
+  compact?: boolean
+  className?: string
 }) {
   return (
-    <div className="ops-empty-state">
+    <div className={cn('ops-empty-state', compact && 'ops-empty-state-compact', className)}>
       <div className="ops-empty-icon">{icon || <AlertTriangle className="h-7 w-7" />}</div>
       <div className="ops-empty-title">{title}</div>
       <p className="ops-empty-copy">{description}</p>
-      {action ? <div className="mt-3">{action}</div> : null}
+      {action ? <div className="mt-4">{action}</div> : null}
     </div>
   )
 }
@@ -42,7 +48,7 @@ export function OpsSection({
   return (
     <section className={cn('ops-panel', className)}>
       <div className="ops-panel-header">
-        <div>
+        <div className="min-w-0">
           <h3 className="ops-panel-title">{title}</h3>
           {description ? <p className="ops-panel-copy">{description}</p> : null}
         </div>
@@ -51,6 +57,16 @@ export function OpsSection({
       {children}
     </section>
   )
+}
+
+export function OpsSummaryStrip({
+  children,
+  className,
+}: {
+  children: ReactNode
+  className?: string
+}) {
+  return <section className={cn('ops-summary-strip', className)}>{children}</section>
 }
 
 export function OpsMetricTile({
@@ -68,15 +84,37 @@ export function OpsMetricTile({
 }) {
   return (
     <article className={cn('ops-metric-tile', `ops-tone-${tone}`)}>
-      <div className="flex items-start justify-between gap-4">
-        <div>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
           <div className="ops-metric-label">{label}</div>
           <div className="ops-metric-value">{value}</div>
         </div>
-        {spark ? <div className="min-w-[72px]">{spark}</div> : null}
+        {spark ? <div className="shrink-0">{spark}</div> : null}
       </div>
       {detail ? <div className="ops-metric-detail">{detail}</div> : null}
     </article>
+  )
+}
+
+export function OpsToolbar({
+  title,
+  children,
+  actions,
+  className,
+}: {
+  title?: string
+  children: ReactNode
+  actions?: ReactNode
+  className?: string
+}) {
+  return (
+    <div className={cn('ops-toolbar', className)}>
+      <div className="flex min-w-0 flex-1 flex-wrap items-center gap-3">
+        {title ? <div className="ops-toolbar-label">{title}</div> : null}
+        {children}
+      </div>
+      {actions ? <div className="flex items-center gap-2">{actions}</div> : null}
+    </div>
   )
 }
 
@@ -133,7 +171,7 @@ export function OpsInspector({
   return (
     <aside className={cn('ops-inspector', className)}>
       <div className="ops-panel-header">
-        <div>
+        <div className="min-w-0">
           <h4 className="ops-panel-title text-base">{title}</h4>
           {subtitle ? <p className="ops-panel-copy">{subtitle}</p> : null}
         </div>
@@ -141,6 +179,36 @@ export function OpsInspector({
       </div>
       {children}
     </aside>
+  )
+}
+
+export function OpsDrawerInspector({
+  open,
+  onOpenChange,
+  title,
+  subtitle,
+  children,
+  widthClassName = 'sm:max-w-[28rem]',
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  title: string
+  subtitle?: string
+  children: ReactNode
+  widthClassName?: string
+}) {
+  return (
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent side="right" className={cn('ops-drawer', widthClassName)}>
+        <SheetHeader className="border-b border-border/60 px-5 py-4">
+          <SheetTitle>{title}</SheetTitle>
+          {subtitle ? <SheetDescription>{subtitle}</SheetDescription> : null}
+        </SheetHeader>
+        <ScrollArea className="flex-1">
+          <div className="px-5 py-5">{children}</div>
+        </ScrollArea>
+      </SheetContent>
+    </Sheet>
   )
 }
 
@@ -152,10 +220,10 @@ export function OpsDefinitionList({
   monoKeys?: string[]
 }) {
   return (
-    <dl className="grid gap-3">
+    <dl className="grid gap-2.5">
       {items.map((item) => (
-        <div key={item.label} className="grid grid-cols-[140px_1fr] gap-3 border-b border-border/40 pb-3 last:border-b-0 last:pb-0">
-          <dt className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">{item.label}</dt>
+        <div key={item.label} className="grid grid-cols-[128px_1fr] gap-3 border-b border-border/35 pb-2.5 last:border-b-0 last:pb-0">
+          <dt className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">{item.label}</dt>
           <dd className={cn('text-sm text-foreground', monoKeys.includes(item.label) && 'font-mono text-[12px]')}>{item.value}</dd>
         </div>
       ))}
@@ -215,7 +283,7 @@ export function OpsDataTable<T>({
   columns: DataColumn<T>[]
   rows: T[]
   rowKey: (row: T, index: number) => string
-  onRowClick?: (row: T) => void
+  onRowClick?: (row: T, index: number) => void
   emptyTitle?: string
   emptyDescription?: string
   stickyHeader?: boolean
@@ -239,7 +307,7 @@ export function OpsDataTable<T>({
             <tr
               key={rowKey(row, index)}
               className={onRowClick ? 'cursor-pointer' : undefined}
-              onClick={onRowClick ? () => onRowClick(row) : undefined}
+              onClick={onRowClick ? () => onRowClick(row, index) : undefined}
             >
               {columns.map((column) => (
                 <td key={column.key} className={column.className}>{column.render(row)}</td>
@@ -262,16 +330,15 @@ export function OpsFilterBar({
   onReset?: () => void
 }) {
   return (
-    <div className="ops-filter-bar">
-      <div className="flex items-center gap-3">
-        {title ? <div className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">{title}</div> : null}
-        <div className="flex flex-wrap items-center gap-3">{children}</div>
-      </div>
-      {onReset ? (
-        <Button type="button" variant="ghost" onClick={onReset} className="rounded-xl">
-          Reset filters
+    <OpsToolbar
+      title={title}
+      actions={onReset ? (
+        <Button type="button" variant="ghost" onClick={onReset} className="rounded-lg">
+          Reset
         </Button>
-      ) : null}
-    </div>
+      ) : undefined}
+    >
+      {children}
+    </OpsToolbar>
   )
 }

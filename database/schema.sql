@@ -15,6 +15,8 @@ CREATE TABLE IF NOT EXISTS officers (
     buckle_id       VARCHAR(50) UNIQUE NOT NULL,
     full_name       VARCHAR(255) NOT NULL,
     phone_number    VARCHAR(20),
+    email           VARCHAR(255),
+    rank            VARCHAR(100),
     position        VARCHAR(100),
     department      VARCHAR(100),
     station         VARCHAR(100),
@@ -22,6 +24,8 @@ CREATE TABLE IF NOT EXISTS officers (
     imported_at     TIMESTAMPTZ DEFAULT NOW(),
     updated_at      TIMESTAMPTZ DEFAULT NOW()
 );
+ALTER TABLE officers ADD COLUMN IF NOT EXISTS email VARCHAR(255);
+ALTER TABLE officers ADD COLUMN IF NOT EXISTS rank VARCHAR(100);
 CREATE INDEX IF NOT EXISTS idx_officers_buckle_id ON officers(buckle_id);
 
 -- ============================================================
@@ -532,6 +536,7 @@ CREATE TABLE IF NOT EXISTS admin_accounts (
     locked_until            TIMESTAMPTZ,
     last_login              TIMESTAMPTZ,
     last_password_change    TIMESTAMPTZ DEFAULT NOW(),
+    must_change_password    BOOLEAN DEFAULT FALSE,
     is_active               BOOLEAN DEFAULT TRUE,
     created_at              TIMESTAMPTZ DEFAULT NOW(),
     updated_at              TIMESTAMPTZ DEFAULT NOW()
@@ -539,6 +544,7 @@ CREATE TABLE IF NOT EXISTS admin_accounts (
 ALTER TABLE admin_accounts ADD COLUMN IF NOT EXISTS totp_secret TEXT;
 ALTER TABLE admin_accounts ADD COLUMN IF NOT EXISTS totp_enabled BOOLEAN DEFAULT FALSE;
 ALTER TABLE admin_accounts ADD COLUMN IF NOT EXISTS totp_enforced_at TIMESTAMPTZ;
+ALTER TABLE admin_accounts ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN DEFAULT FALSE;
 CREATE INDEX IF NOT EXISTS idx_admin_accounts_email ON admin_accounts(email);
 
 -- ============================================================

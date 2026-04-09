@@ -148,7 +148,7 @@ export const OSINTTools: React.FC = () => {
       return (
         <Card className="rounded-[1.5rem] border-border/70 border-dashed">
           <CardContent className="p-8 text-center text-sm text-muted-foreground">
-            Run a lookup to view results here. Existing OSINT request behavior remains unchanged.
+            Run a lookup to view results here. Unsupported providers will return an explicit unavailable state instead of simulated data.
           </CardContent>
         </Card>
       )
@@ -222,7 +222,7 @@ export const OSINTTools: React.FC = () => {
               <div>
                 <CardTitle className="text-3xl tracking-tight">Open-source intelligence workspace</CardTitle>
                 <CardDescription className="mt-2 max-w-3xl text-base leading-7">
-                  On-premise lookup tools for phone, IP, breach, domain, and URL intelligence. This refresh updates only the visual layer and state handling.
+                  On-premise lookup tools for phone, IP, breach, domain, and URL intelligence. Provider-backed lookups only render live backend results.
                 </CardDescription>
               </div>
             </div>
@@ -274,7 +274,7 @@ export const OSINTTools: React.FC = () => {
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <p className="text-sm text-muted-foreground">
                   {activeTab === 'crawler'
-                    ? 'Enter one URL per line. The existing crawl logic and limits are unchanged.'
+                    ? 'Enter one URL per line. Crawl requests are routed through the backend crawler.'
                     : 'Press Enter to run the lookup, or use the search button.'}
                 </p>
                 <Button type="button" onClick={handleSearch} disabled={isLoading || !query.trim()} className="rounded-2xl">
@@ -295,7 +295,7 @@ export const OSINTTools: React.FC = () => {
             <span className="material-symbols-outlined">info</span>
             <AlertTitle>Operational note</AlertTitle>
             <AlertDescription>
-              All lookups are performed on-premise. Phone validation and breach checks may use simulated data in this environment.
+              All lookups are performed on-premise or through configured backend providers. Disabled providers return an explicit unavailable response.
             </AlertDescription>
           </Alert>
         </CardContent>

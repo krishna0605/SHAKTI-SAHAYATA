@@ -117,22 +117,32 @@ export const runStartupSelfChecks = async ({
 
   try {
     const result = await pool.query(
-      `SELECT buckle_id
-       FROM users
-       WHERE buckle_id = ANY($1::text[]) AND is_active = TRUE`,
-      [['BK-4782', 'BK-9999']]
+      `
+        SELECT
+          (SELECT COUNT(*)::int FROM officers WHERE buckle_id BETWEEN 'BK-1001' AND 'BK-1050' AND is_active = TRUE) AS officer_count,
+          (SELECT COUNT(*)::int FROM admin_accounts WHERE is_active = TRUE) AS admin_count
+      `
     );
-    const present = result.rows.map((row) => row.buckle_id);
-    const missing = ['BK-4782', 'BK-9999'].filter((id) => !present.includes(id));
-    if (missing.length > 0) {
-      checks.seedUsers = buildCheck(FAIL, `Missing required seed users: ${missing.join(', ')}`, { missing });
-      failed.push('seedUsers');
+    const officerCount = result.rows[0]?.officer_count || 0;
+    const adminCount = result.rows[0]?.admin_count || 0;
+
+    if (officerCount < 50 || adminCount < 1) {
+      checks.bootstrapIdentities = buildCheck(
+        FAIL,
+        `Controlled bootstrap identities are incomplete (officers=${officerCount}, admins=${adminCount}).`,
+        { officerCount, adminCount }
+      );
+      failed.push('bootstrapIdentities');
     } else {
-      checks.seedUsers = buildCheck(PASS, 'Required seed users are available.', { present });
+      checks.bootstrapIdentities = buildCheck(
+        PASS,
+        'Controlled officer and admin bootstrap identities are available.',
+        { officerCount, adminCount }
+      );
     }
   } catch (error) {
-    checks.seedUsers = buildCheck(FAIL, error?.message || 'Unable to verify seed users');
-    failed.push('seedUsers');
+    checks.bootstrapIdentities = buildCheck(FAIL, error?.message || 'Unable to verify controlled bootstrap identities');
+    failed.push('bootstrapIdentities');
   }
 
   const ollamaConfig = getOllamaRuntimeConfig();
@@ -235,4 +245,3 @@ export const getReadyHealth = () => {
     },
   };
 };
-

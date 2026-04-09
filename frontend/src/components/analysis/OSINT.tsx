@@ -264,8 +264,8 @@ export const OSINT: React.FC = () => {
           const found = typeof details.found === 'boolean' ? details.found : false;
           const breachCount = typeof details.breach_count === 'number' ? details.breach_count : 0;
           summary = found
-            ? `ALERT: Handle/Email found in ${breachCount} data breaches. High digital footprint.`
-            : 'Clean record: No data breaches found for this handle/email in our limited database.';
+            ? `ALERT: Query matched ${breachCount} breach dataset(s) in the configured provider response.`
+            : 'No breach matches were returned by the configured provider.';
           break;
         }
         default: {
@@ -388,8 +388,6 @@ export const OSINT: React.FC = () => {
   };
 
   const primitiveRows = results ? getPrimitiveSummaryRows(results.details) : [];
-  const isSimulated = results?.source ? /simulated/i.test(results.source) : false;
-
   return (
     <div className="h-full flex flex-col bg-slate-50 dark:bg-slate-900 p-6 overflow-y-auto">
       <div className="mb-8">
@@ -492,11 +490,6 @@ export const OSINT: React.FC = () => {
               <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg border border-blue-100 dark:border-blue-800">
                 <div className="flex items-center justify-between mb-2 gap-2">
                   <h3 className="font-semibold text-blue-900 dark:text-blue-300">Executive Summary</h3>
-                  {isSimulated ? (
-                    <span className="text-[10px] uppercase tracking-wider font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">
-                      Simulated
-                    </span>
-                  ) : null}
                 </div>
                 <p className="text-slate-700 dark:text-slate-300">{results.summary}</p>
                 {results.source && (

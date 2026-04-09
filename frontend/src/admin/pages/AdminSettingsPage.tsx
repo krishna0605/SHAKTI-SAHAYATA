@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { AlertTriangle } from 'lucide-react'
 import { adminConsoleAPI } from '../lib/api'
 import { formatTimestamp, normalizeStatusTone, titleCase } from '../lib/format'
-import { OpsMetricTile, OpsPageState, OpsSection, OpsStatusBadge } from '../components/OpsPrimitives'
+import { OpsMetricTile, OpsPageState, OpsSection, OpsStatusBadge, OpsSummaryStrip } from '../components/OpsPrimitives'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
 const settingsSections = [
@@ -36,16 +36,16 @@ export default function AdminSettingsPage() {
   const snapshot = systemQuery.data
 
   return (
-    <div className="space-y-6">
-      <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-        <OpsMetricTile label="Environment" value="Production" detail="Console served in protected production posture." tone="info" />
-        <OpsMetricTile label="Overall Status" value={titleCase(snapshot.overallStatus)} detail="Platform-wide readiness posture." tone={normalizeStatusTone(snapshot.overallStatus)} />
-        <OpsMetricTile label="Recent Self-Checks" value={snapshot.selfChecks.length} detail="Health verification runs recorded in the current snapshot." />
-        <OpsMetricTile label="Latest Refresh" value={formatTimestamp(snapshot.generatedAt)} detail="Last governed configuration snapshot time." />
-      </section>
+    <div className="min-w-0 space-y-6">
+      <OpsSummaryStrip className="xl:grid-cols-4">
+        <OpsMetricTile label="Backend Readiness" value={titleCase(snapshot.backend.ready.status)} detail="Core backend and auth readiness posture." tone={normalizeStatusTone(snapshot.backend.ready.status)} />
+        <OpsMetricTile label="Database Status" value={titleCase(snapshot.database.status)} detail={snapshot.database.detail} tone={normalizeStatusTone(snapshot.database.status)} />
+        <OpsMetricTile label="Uploads Status" value={titleCase(snapshot.uploads.status)} detail={snapshot.uploads.detail} tone={normalizeStatusTone(snapshot.uploads.status)} />
+        <OpsMetricTile label="Latest Refresh" value={formatTimestamp(snapshot.generatedAt)} detail="Current system configuration snapshot time." />
+      </OpsSummaryStrip>
 
-      <OpsSection title="Controlled System Configuration" description="Settings are grouped by domain and intentionally read-only by default in this delivery phase. Sensitive mutations remain deliberate, privileged, and audited.">
-        <Tabs defaultValue="parser" className="space-y-5">
+      <OpsSection title="Controlled System Configuration" description="Settings are grouped by domain and surfaced as governed posture. Any future mutation path stays privileged, deliberate, and auditable.">
+        <Tabs defaultValue="parser" className="min-w-0 space-y-5">
           <TabsList className="flex h-auto flex-wrap justify-start rounded-xl border border-border/70 bg-card/80 p-1">
             {settingsSections.map((section) => (
               <TabsTrigger key={section.key} value={section.key} className="rounded-lg px-3 py-2">
@@ -55,15 +55,15 @@ export default function AdminSettingsPage() {
           </TabsList>
 
           {settingsSections.map((section) => (
-            <TabsContent key={section.key} value={section.key}>
+            <TabsContent key={section.key} value={section.key} className="min-w-0">
               <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
                 <div className="ops-subpanel">
                   <div className="ops-subpanel-title">{section.title}</div>
                   <p className="text-sm leading-6 text-muted-foreground">{section.detail}</p>
                   <div className="mt-4 flex flex-wrap gap-2">
-                    <OpsStatusBadge label="Audited" tone="info" />
-                    <OpsStatusBadge label="Read-only default" tone="success" />
-                    <OpsStatusBadge label="Privileged changes require confirmation" tone="warning" />
+                    <OpsStatusBadge label="Audited visibility" tone="info" />
+                    <OpsStatusBadge label="Privileged changes gated" tone="warning" />
+                    <OpsStatusBadge label="Operator-safe surface" tone="success" />
                   </div>
                 </div>
 

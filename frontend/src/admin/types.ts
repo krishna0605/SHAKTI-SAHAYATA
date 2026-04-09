@@ -4,6 +4,7 @@ export interface AdminIdentity {
   fullName: string
   role: string
   permissions: string[]
+  mustChangePassword?: boolean
   isActive?: boolean
   lastLogin?: string | null
   createdAt?: string | null

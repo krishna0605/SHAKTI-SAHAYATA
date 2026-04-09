@@ -16,7 +16,7 @@ const runtimeState = {
       uploads: { status: 'pass' },
       auth: { status: 'pass' },
       ollama: { status: 'degraded' },
-      seedUsers: { status: 'pass' },
+      bootstrapIdentities: { status: 'pass' },
     },
     summary: { failed: [], degraded: ['ollama'] },
   },

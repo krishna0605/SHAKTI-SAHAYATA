@@ -125,7 +125,8 @@ const buildAuthResponse = async ({ user, session, res, refreshToken }) => {
       buckleId: user.buckle_id,
       email: user.email,
       fullName: user.full_name,
-      role: user.role
+      role: user.role,
+      mustChangePassword: Boolean(user.must_change_password),
     },
     accessToken: tokenPayload.accessToken,
     expiresAt: tokenPayload.expiresAt,
@@ -392,7 +393,7 @@ router.get('/me', authenticateToken, async (req, res) => {
   try {
     const result = await pool.query(
       `SELECT u.id, u.buckle_id, u.email, u.full_name, u.role, u.last_login, u.login_count,
-              o.position, o.department, o.station
+              o.position, o.department, o.station, u.must_change_password
        FROM users u
        JOIN officers o ON u.buckle_id = o.buckle_id
        WHERE u.id = $1`,
@@ -408,6 +409,7 @@ router.get('/me', authenticateToken, async (req, res) => {
       email: user.email,
       fullName: user.full_name,
       role: user.role,
+      mustChangePassword: Boolean(user.must_change_password),
       position: user.position,
       department: user.department,
       station: user.station,

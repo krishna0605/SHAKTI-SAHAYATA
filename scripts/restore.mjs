@@ -73,7 +73,8 @@ const main = async () => {
 
   const caseCount = await run('docker', ['exec', postgresContainer, 'psql', '-U', dbUser, '-d', targetDb, '-t', '-A', '-c', 'SELECT COUNT(*) FROM cases']);
   const fileCount = await run('docker', ['exec', postgresContainer, 'psql', '-U', dbUser, '-d', targetDb, '-t', '-A', '-c', 'SELECT COUNT(*) FROM uploaded_files']);
-  const seedUserCount = await run('docker', ['exec', postgresContainer, 'psql', '-U', dbUser, '-d', targetDb, '-t', '-A', '-c', "SELECT COUNT(*) FROM users WHERE buckle_id IN ('BK-4782','BK-9999')"]);
+  const bootstrapOfficerCount = await run('docker', ['exec', postgresContainer, 'psql', '-U', dbUser, '-d', targetDb, '-t', '-A', '-c', "SELECT COUNT(*) FROM officers WHERE buckle_id BETWEEN 'BK-1001' AND 'BK-1050'"]);
+  const adminCount = await run('docker', ['exec', postgresContainer, 'psql', '-U', dbUser, '-d', targetDb, '-t', '-A', '-c', 'SELECT COUNT(*) FROM admin_accounts']);
 
   const report = {
     status: 'success',
@@ -82,7 +83,8 @@ const main = async () => {
     targetDb,
     restoredCaseCount: Number(caseCount.stdout.trim() || 0),
     restoredFileCount: Number(fileCount.stdout.trim() || 0),
-    seedUserCount: Number(seedUserCount.stdout.trim() || 0),
+    bootstrapOfficerCount: Number(bootstrapOfficerCount.stdout.trim() || 0),
+    adminCount: Number(adminCount.stdout.trim() || 0),
     uploadsExtractPath,
   };
 

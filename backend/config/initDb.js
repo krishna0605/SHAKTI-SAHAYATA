@@ -19,6 +19,7 @@ const findFile = (filename) => {
 };
 
 const REQUIRED_TABLES = ['cases', 'admin_accounts'];
+const autoSeedEnabled = String(process.env.DB_AUTO_SEED || '').trim().toLowerCase() === 'true';
 
 /**
  * Check if core and admin tables exist in the database.
@@ -62,7 +63,7 @@ const applySchema = async () => {
 };
 
 /**
- * Apply seed data (officers, default users, app_settings).
+ * Apply legacy seed data only when explicitly enabled.
  */
 const applySeed = async () => {
   const seedPath = findFile('seed.sql');
@@ -107,7 +108,7 @@ const ensureOsintTable = async () => {
 /**
  * Initialize the database on backend startup.
  * - If tables are missing, apply schema.sql
- * - Always ensure seed principals and app defaults exist
+ * - Optional legacy seed path remains hard-gated behind DB_AUTO_SEED=true
  * - Always ensure osint_crawls table exists
  */
 export const initializeDatabase = async () => {
@@ -124,8 +125,12 @@ export const initializeDatabase = async () => {
   const schemaApplied = await applySchema();
   if (!schemaApplied && !tablesExist) return;
 
-  await applySeed();
-  console.log('[initDb] ✅ Seed users and defaults verified');
+  if (autoSeedEnabled) {
+    await applySeed();
+    console.warn('[initDb] ⚠️  DB_AUTO_SEED=true enabled seed.sql execution. Disable this outside controlled development.');
+  } else {
+    console.log('[initDb] Seed execution disabled. Use the controlled bootstrap flow for officers and admins.');
+  }
 
   // Always ensure OSINT table exists (Phase 6 addition)
   await ensureOsintTable();

@@ -21,6 +21,31 @@ const LOCKOUT_DURATION_MINUTES = 30;
 
 const createRefreshToken = () => crypto.randomBytes(40).toString('hex');
 const hashToken = (token) => crypto.createHash('sha256').update(token).digest('hex');
+const strongPasswordPattern = {
+  upper: /[A-Z]/,
+  lower: /[a-z]/,
+  digit: /[0-9]/,
+  special: /[^A-Za-z0-9]/,
+};
+
+const validateStrongPassword = (password) => {
+  if (password.length < 14) {
+    return 'Password must be at least 14 characters long.';
+  }
+  if (!strongPasswordPattern.upper.test(password)) {
+    return 'Password must contain at least one uppercase letter.';
+  }
+  if (!strongPasswordPattern.lower.test(password)) {
+    return 'Password must contain at least one lowercase letter.';
+  }
+  if (!strongPasswordPattern.digit.test(password)) {
+    return 'Password must contain at least one numeric character.';
+  }
+  if (!strongPasswordPattern.special.test(password)) {
+    return 'Password must contain at least one special character.';
+  }
+  return null;
+};
 
 const buildAccessTokenPayload = (admin) => {
   const accessToken = signAdminAccessToken(admin, {
@@ -164,7 +189,8 @@ const buildAdminResponse = async ({ admin, session, res, refreshToken }) => {
       email: admin.email,
       fullName: admin.full_name,
       role: admin.role,
-      permissions: Array.isArray(admin.permissions) ? admin.permissions : []
+      permissions: Array.isArray(admin.permissions) ? admin.permissions : [],
+      mustChangePassword: Boolean(admin.must_change_password),
     },
     accessToken: normalizedTokenPayload.accessToken,
     expiresAt: normalizedTokenPayload.expiresAt,
@@ -501,6 +527,7 @@ router.get('/me', authenticateAdminToken, async (req, res) => {
           is_active,
           last_login,
           created_at,
+          must_change_password,
           COALESCE(totp_enabled, FALSE) AS totp_enabled,
           CASE WHEN totp_secret IS NOT NULL AND TRIM(totp_secret) <> '' THEN TRUE ELSE FALSE END AS totp_secret_configured
         FROM admin_accounts
@@ -524,6 +551,7 @@ router.get('/me', authenticateAdminToken, async (req, res) => {
       isActive: admin.is_active,
       lastLogin: admin.last_login,
       createdAt: admin.created_at,
+      mustChangePassword: Boolean(admin.must_change_password),
       totpEnabled: Boolean(admin.totp_enabled),
       totpSecretConfigured: Boolean(admin.totp_secret_configured),
       recentAuthWindowMinutes: ADMIN_CONSOLE_CONFIG.recentAuthWindowMinutes,
@@ -605,6 +633,78 @@ router.post('/re-auth', authenticateAdminToken, async (req, res) => {
   } catch (error) {
     console.error('[ADMIN_AUTH] Re-auth error:', error);
     return res.status(500).json({ error: 'Failed to refresh recent admin authentication' });
+  }
+});
+
+router.post('/change-password', authenticateAdminToken, async (req, res) => {
+  const currentPassword = String(req.body?.currentPassword || '');
+  const newPassword = String(req.body?.newPassword || '');
+  const totpCode = String(req.body?.totpCode || '').trim();
+
+  if (!currentPassword || !newPassword) {
+    return res.status(400).json({ error: 'Current password and new password are required' });
+  }
+
+  const passwordValidationError = validateStrongPassword(newPassword);
+  if (passwordValidationError) {
+    return res.status(400).json({ error: passwordValidationError });
+  }
+
+  if (currentPassword === newPassword) {
+    return res.status(400).json({ error: 'New password must be different from the current password' });
+  }
+
+  try {
+    const admin = await getAdminById(req.admin.adminId);
+    if (!admin || !admin.is_active) {
+      return res.status(404).json({ error: 'Admin account not found' });
+    }
+
+    const validPassword = await bcrypt.compare(currentPassword, admin.password_hash);
+    if (!validPassword) {
+      await logAdminAction({
+        adminAccountId: admin.id,
+        sessionId: req.admin.sessionId,
+        action: 'ADMIN_PASSWORD_CHANGE_FAILED',
+        resourceType: 'admin_account',
+        resourceId: String(admin.id),
+        ipAddress: req.ip,
+      });
+      return res.status(401).json({ error: 'Current password is incorrect' });
+    }
+
+    const totpState = getAdminTotpPolicyState(admin);
+    if (totpState.required && !verifyAdminTotpCode(admin.totp_secret, totpCode)) {
+      return res.status(401).json({ error: 'Invalid TOTP code', code: 'ADMIN_TOTP_REQUIRED' });
+    }
+
+    const passwordHash = await bcrypt.hash(newPassword, 12);
+    await pool.query(
+      `
+        UPDATE admin_accounts
+        SET
+          password_hash = $2,
+          must_change_password = FALSE,
+          last_password_change = NOW(),
+          updated_at = NOW()
+        WHERE id = $1
+      `,
+      [admin.id, passwordHash]
+    );
+
+    await logAdminAction({
+      adminAccountId: admin.id,
+      sessionId: req.admin.sessionId,
+      action: 'ADMIN_PASSWORD_CHANGED',
+      resourceType: 'admin_account',
+      resourceId: String(admin.id),
+      ipAddress: req.ip,
+    });
+
+    return res.json({ message: 'Admin password updated successfully' });
+  } catch (error) {
+    console.error('[ADMIN_AUTH] Change password error:', error);
+    return res.status(500).json({ error: 'Failed to update admin password' });
   }
 });
 

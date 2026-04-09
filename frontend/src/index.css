@@ -105,79 +105,144 @@
 
 @layer components {
   .ops-app-shell {
-    @apply grid min-h-screen lg:grid-cols-[280px_1fr] bg-[#08101d] text-slate-100;
+    @apply h-screen overflow-hidden bg-[#090b0f] text-slate-100 lg:grid lg:grid-cols-[256px_1fr];
   }
   .ops-sidebar {
-    @apply sticky top-0 flex h-screen flex-col gap-5 border-r border-slate-800 bg-[#070d17] px-4 py-5;
+    @apply h-screen min-w-0 overflow-hidden border-r border-white/10 bg-[#0b0d12] transition-[width,padding] duration-200 ease-out;
+  }
+  .ops-sidebar.collapsed {
+    @apply px-2;
+  }
+  .ops-sidebar-inner {
+    @apply flex h-full min-h-0 flex-col px-3 py-4;
+  }
+  .ops-sidebar.collapsed .ops-sidebar-inner {
+    @apply px-2;
   }
   .ops-sidebar-brand {
-    @apply flex items-center gap-3 rounded-2xl border border-slate-800 bg-slate-950/70 px-4 py-4;
+    @apply flex items-center gap-3 px-2 py-2;
   }
   .ops-sidebar-logo {
-    @apply flex h-10 w-10 items-center justify-center rounded-xl bg-slate-100 text-slate-950;
+    @apply flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-white text-slate-950 shadow-[0_6px_20px_rgba(255,255,255,0.06)];
+  }
+  .ops-sidebar.collapsed .ops-sidebar-brand {
+    @apply justify-center px-0;
   }
   .ops-sidebar-profile {
-    @apply rounded-2xl border border-slate-800 bg-slate-950/60 px-4 py-4;
+    @apply mb-3 rounded-lg border border-white/10 bg-white/[0.03] px-2.5 py-2.5;
+  }
+  .ops-sidebar.collapsed .ops-sidebar-profile {
+    @apply px-0 py-0 border-transparent bg-transparent shadow-none;
+  }
+  .ops-sidebar-scroll {
+    @apply min-h-0 flex-1 space-y-1 overflow-hidden pr-0;
+  }
+  .ops-sidebar-group-label {
+    @apply px-3 pb-2 pt-3 text-[10px] font-semibold uppercase tracking-[0.24em] text-slate-500;
   }
   .ops-sidebar-link {
-    @apply flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-400 transition hover:bg-slate-900 hover:text-white;
+    @apply relative flex min-h-[44px] flex-nowrap items-center gap-2.5 rounded-lg px-2.5 py-2 text-[15px] font-medium text-slate-300 transition-[background-color,color,transform,border-color] duration-150 ease-out hover:bg-white/[0.04] hover:text-white hover:translate-x-[1px];
+  }
+  .ops-sidebar-link::before {
+    content: "";
+    @apply absolute left-0 top-1/2 h-6 w-px -translate-y-1/2 rounded-full bg-transparent transition-colors duration-150;
   }
   .ops-sidebar-link.active {
-    @apply border border-slate-700 bg-slate-100 text-slate-950;
+    @apply bg-white/[0.08] text-white shadow-[inset_0_0_0_1px_rgba(255,255,255,0.04)];
   }
-  .ops-sidebar-note {
-    @apply rounded-2xl border border-dashed border-slate-800 bg-slate-950/40 px-4 py-4 text-sm leading-6 text-slate-400;
+  .ops-sidebar-link.active::before {
+    @apply bg-blue-300;
+  }
+  .ops-sidebar-link-icon {
+    @apply flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-transparent text-slate-300 transition-[background-color,color,border-color] duration-150 ease-out;
+  }
+  .ops-sidebar-link:hover .ops-sidebar-link-icon,
+  .ops-sidebar-link.active .ops-sidebar-link-icon {
+    @apply border-white/10 bg-white/[0.04] text-white;
+  }
+  .ops-sidebar-link-label {
+    @apply block truncate text-[15px] font-medium leading-5 text-inherit;
+  }
+  .ops-sidebar-link.is-collapsed {
+    @apply min-h-[44px] justify-center px-0 py-0;
+  }
+  .ops-sidebar-link.is-collapsed::before {
+    @apply left-1/2 top-auto bottom-0 h-px w-6 -translate-x-1/2 translate-y-0;
+  }
+  .ops-sidebar-link.is-collapsed .ops-sidebar-link-icon {
+    @apply h-10 w-10 rounded-lg;
+  }
+  .ops-sidebar-footer {
+    @apply mt-auto flex items-center gap-2 border-t border-white/10 pt-3;
+  }
+  .ops-sidebar.collapsed .ops-sidebar-footer {
+    @apply justify-center;
+  }
+  .ops-sidebar-toggle {
+    @apply h-10 w-full rounded-lg border border-white/10 bg-white/[0.03] text-slate-200 transition-[background-color,color,border-color,transform] duration-150 ease-out hover:bg-white/[0.06] hover:text-white hover:-translate-y-px;
+  }
+  .ops-sidebar-icon-toggle {
+    @apply h-10 w-10 rounded-lg border border-white/10 bg-[#101725] text-slate-100 transition-[background-color,color,border-color,transform] duration-150 ease-out hover:-translate-y-px hover:border-white/15 hover:bg-[#131c2d] hover:text-white;
+  }
+  .ops-main-shell {
+    @apply min-w-0 h-screen overflow-hidden bg-[#090b0f];
+  }
+  .ops-main-scroll {
+    @apply h-full overflow-y-auto overflow-x-hidden;
   }
   .ops-topbar {
-    @apply sticky top-0 z-20 border-b border-slate-800 bg-[#0b1322] px-5 py-4 backdrop-blur;
+    @apply sticky top-0 z-20 min-w-0 overflow-x-hidden border-b border-white/10 bg-[#0d1015] px-4 py-4 backdrop-blur-xl xl:px-6;
   }
   .ops-page {
-    @apply space-y-6 bg-[#08101d] px-5 py-6;
-  }
-  .ops-header-badge {
-    @apply inline-flex items-center rounded-full border border-slate-700 bg-slate-900 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-300;
+    @apply min-w-0 space-y-5 overflow-x-hidden bg-[#090b0f] px-4 py-5 xl:px-6;
   }
   .ops-panel {
-    @apply rounded-2xl border border-slate-800 bg-[#0c1526] p-5 shadow-[0_14px_40px_rgba(2,6,23,0.24)];
+    @apply min-w-0 rounded-xl border border-white/10 bg-[#0f1218] p-4 transition-[border-color,background-color] duration-150 ease-out;
   }
   .ops-panel-header {
-    @apply mb-4 flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between;
+    @apply mb-4 flex min-w-0 flex-col gap-2 xl:flex-row xl:items-start xl:justify-between;
   }
   .ops-panel-title {
-    @apply text-lg font-semibold tracking-tight text-slate-100;
+    @apply text-base font-semibold tracking-tight text-slate-100;
   }
   .ops-panel-copy {
     @apply mt-1 text-sm leading-6 text-slate-400;
   }
   .ops-subpanel {
-    @apply rounded-2xl border border-slate-800 bg-[#0a1220] p-4;
+    @apply rounded-lg border border-white/10 bg-[#0b0e14] p-4;
   }
   .ops-subpanel-title {
     @apply mb-3 text-xs font-semibold uppercase tracking-[0.18em] text-slate-400;
   }
-  .ops-filter-bar {
-    @apply mb-4 flex flex-col gap-3 rounded-2xl border border-slate-800 bg-[#0a1220] px-4 py-3 xl:flex-row xl:items-center xl:justify-between;
+  .ops-toolbar {
+    @apply mb-4 flex min-w-0 flex-col gap-3 rounded-lg border border-white/10 bg-[#0b0e14] px-3 py-3 xl:flex-row xl:items-center xl:justify-between;
+  }
+  .ops-toolbar-label {
+    @apply text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500;
+  }
+  .ops-summary-strip {
+    @apply grid gap-3 md:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-5;
   }
   .ops-metric-tile {
-    @apply rounded-2xl border border-slate-800 bg-[#0c1526] px-4 py-4;
+    @apply rounded-lg border border-white/10 bg-[#0f1218] px-4 py-3 transition-[border-color,background-color,transform] duration-150 ease-out hover:border-white/15 hover:bg-[#11151d];
   }
   .ops-metric-label {
     @apply text-xs font-semibold uppercase tracking-[0.18em] text-slate-500;
   }
   .ops-metric-value {
-    @apply mt-2 text-2xl font-semibold text-slate-100;
+    @apply mt-1.5 text-xl font-semibold text-slate-100;
   }
   .ops-metric-detail {
-    @apply mt-3 text-sm leading-6 text-slate-400;
+    @apply mt-2 text-xs leading-5 text-slate-400;
   }
   .ops-status-badge {
-    @apply inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.16em];
+    @apply inline-flex items-center rounded-md border px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] transition-colors duration-150 ease-out;
   }
   .ops-entity-chip {
-    @apply inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.16em];
+    @apply inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] transition-[background-color,color,border-color,transform] duration-150 ease-out hover:-translate-y-px;
   }
   .ops-tone-neutral {
-    @apply border-slate-700 bg-slate-900/70 text-slate-300;
+    @apply border-white/10 bg-white/[0.04] text-slate-300;
   }
   .ops-tone-success {
     @apply border-emerald-500/25 bg-emerald-500/10 text-emerald-300;
@@ -192,31 +257,37 @@
     @apply border-blue-500/25 bg-blue-500/10 text-blue-300;
   }
   .ops-inspector {
-    @apply rounded-2xl border border-slate-800 bg-[#0c1526] p-5;
+    @apply rounded-xl border border-white/10 bg-[#0f1218] p-4;
+  }
+  .ops-drawer {
+    @apply w-full gap-0 border-l border-white/10 bg-[#101318] p-0 text-slate-100;
   }
   .ops-table-shell {
-    @apply overflow-auto rounded-2xl border border-slate-800 bg-[#08101d];
+    @apply min-w-0 w-full overflow-x-auto overflow-y-hidden rounded-lg border border-white/10 bg-[#0b0e14];
   }
   .ops-table {
-    @apply min-w-full border-collapse text-sm;
+    @apply min-w-full table-fixed border-collapse text-sm;
   }
   .ops-table thead {
-    @apply bg-[#111c31];
+    @apply bg-[#12161d];
   }
   .ops-table th {
-    @apply whitespace-nowrap border-b border-slate-800 px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400;
+    @apply whitespace-nowrap border-b border-white/10 px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500;
   }
   .ops-table td {
-    @apply max-w-[220px] border-b border-slate-800 px-4 py-3 align-top text-slate-200;
+    @apply max-w-[220px] break-words border-b border-white/10 px-4 py-3 align-top text-slate-200;
   }
   .ops-table tbody tr {
-    @apply transition hover:bg-slate-900/60;
+    @apply transition-[background-color] duration-150 ease-out hover:bg-white/[0.03];
   }
   .ops-empty-state {
-    @apply flex min-h-[220px] flex-col items-center justify-center rounded-2xl border border-dashed border-slate-800 bg-[#0a1220] px-6 py-10 text-center;
+    @apply flex min-h-[148px] flex-col items-center justify-center rounded-xl border border-dashed border-white/10 bg-[#0b0e14] px-6 py-7 text-center;
+  }
+  .ops-empty-state-compact {
+    @apply min-h-[104px] px-5 py-5;
   }
   .ops-empty-icon {
-    @apply flex h-12 w-12 items-center justify-center rounded-2xl border border-slate-700 bg-slate-950 text-slate-300;
+    @apply flex h-12 w-12 items-center justify-center rounded-xl border border-white/10 bg-black/20 text-slate-300;
   }
   .ops-empty-title {
     @apply mt-4 text-lg font-semibold text-slate-100;
@@ -225,19 +296,19 @@
     @apply mt-2 max-w-xl text-sm leading-6 text-slate-400;
   }
   .ops-list-row {
-    @apply flex items-start justify-between gap-3 rounded-xl border border-slate-800 bg-[#0a1220] px-4 py-3;
+    @apply flex min-w-0 items-start justify-between gap-3 rounded-lg border border-white/10 bg-[#0b0e14] px-4 py-3 transition-[background-color,border-color,transform] duration-150 ease-out hover:border-white/15 hover:bg-[#0e131c];
   }
   .ops-signal-card {
-    @apply rounded-xl border border-slate-800 bg-[#0a1220] px-4 py-4;
+    @apply rounded-lg border border-white/10 bg-[#0b0e14] px-4 py-4;
   }
   .ops-timeline-item {
-    @apply relative flex gap-3 rounded-xl border border-slate-800 bg-[#0a1220] px-4 py-4;
+    @apply relative flex gap-3 rounded-lg border border-white/10 bg-[#0b0e14] px-4 py-4;
   }
   .ops-timeline-dot {
     @apply mt-1 h-3 w-3 rounded-full border;
   }
   .ops-stage-card {
-    @apply rounded-2xl border border-slate-800 bg-[#0a1220] px-4 py-4;
+    @apply rounded-lg border border-white/10 bg-[#0b0e14] px-4 py-4;
   }
 
   /* Glass card */
@@ -493,10 +564,10 @@
 
   /* ─── Page states ─── */
   .page-loading {
-    @apply flex items-center justify-center h-[60vh] text-gray-500 dark:text-gray-400;
+    @apply flex min-h-[44vh] items-center justify-center rounded-xl border border-dashed border-white/10 bg-[#0b0e14] px-6 py-8 text-sm text-slate-400;
   }
   .page-error {
-    @apply flex flex-col items-center justify-center h-[60vh] gap-4 text-red-500;
+    @apply flex min-h-[44vh] flex-col items-center justify-center gap-4 rounded-xl border border-dashed border-red-500/20 bg-[#0b0e14] px-6 py-8 text-red-300;
   }
 }
 

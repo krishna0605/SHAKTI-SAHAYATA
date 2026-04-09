@@ -19,7 +19,6 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./database/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
-      - ./database/seed.sql:/docker-entrypoint-initdb.d/02-seed.sql
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-shakti_admin} -d ${DB_NAME:-shakti_db}"]
@@ -147,11 +146,81 @@ services:
     networks:
       - shakti-network
 
+  prometheus:
+    profiles: ["observability"]
+    image: prom/prometheus:v2.54.1
+    container_name: shakti-prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --web.enable-lifecycle
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      - ./ops/observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    depends_on:
+      - backend
+      - postgres
+    restart: unless-stopped
+    networks:
+      - shakti-network
+
+  grafana:
+    profiles: ["observability"]
+    image: grafana/grafana:11.2.0
+    container_name: shakti-grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    ports:
+      - "${GRAFANA_PORT:-3002}:3000"
+    volumes:
+      - ./ops/observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./ops/observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+    networks:
+      - shakti-network
+
+  postgres-exporter:
+    profiles: ["observability"]
+    image: quay.io/prometheuscommunity/postgres-exporter:v0.17.1
+    container_name: shakti-postgres-exporter
+    environment:
+      DATA_SOURCE_NAME: postgresql://${DB_USER:-shakti_admin}:${DB_PASSWORD:-localdevpassword}@postgres:5432/${DB_NAME:-shakti_db}?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - shakti-network
+
+  node-exporter:
+    profiles: ["observability"]
+    image: prom/node-exporter:v1.8.2
+    container_name: shakti-node-exporter
+    command:
+      - --path.rootfs=/host
+    pid: host
+    volumes:
+      - /:/host:ro,rslave
+    restart: unless-stopped
+    networks:
+      - shakti-network
+
 volumes:
   pgdata:
     name: shakti-pgdata
   upload_data:
     name: shakti-uploads
+  prometheus_data:
+    name: shakti-prometheus-data
+  grafana_data:
+    name: shakti-grafana-data
 
 networks:
   shakti-network:

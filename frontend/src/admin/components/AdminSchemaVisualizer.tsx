@@ -7,16 +7,20 @@ export default function AdminSchemaVisualizer({
   schema,
   selectedTable,
   onSelectTable,
+  fitTrigger = 0,
 }: {
   schema: AdminDatabaseSchemaResponse
   selectedTable: string | null
   onSelectTable: (tableName: string) => void
+  fitTrigger?: number
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const networkRef = useRef<Network | null>(null)
 
   useEffect(() => {
     if (!containerRef.current) return
+
+    const columnCount = Math.max(4, Math.ceil(Math.sqrt(schema.tables.length * 1.4)))
 
     const nodes = new DataSet<any>(
       schema.tables.map((table, index) => ({
@@ -39,8 +43,8 @@ export default function AdminSchemaVisualizer({
             border: '#8bc4ff',
           },
         },
-        x: (index % 4) * 280,
-        y: Math.floor(index / 4) * 220,
+        x: (index % columnCount) * 230,
+        y: Math.floor(index / columnCount) * 150,
       })),
     )
 
@@ -88,6 +92,12 @@ export default function AdminSchemaVisualizer({
       },
     )
 
+    network.moveTo({
+      position: { x: ((columnCount - 1) * 230) / 2, y: (Math.floor(schema.tables.length / columnCount) * 150) / 2 },
+      scale: 0.95,
+      animation: false,
+    })
+
     network.on('click', (params) => {
       if (params.nodes.length > 0) {
         onSelectTable(String(params.nodes[0]))
@@ -102,5 +112,10 @@ export default function AdminSchemaVisualizer({
     }
   }, [onSelectTable, schema.relationships, schema.tables, selectedTable])
 
-  return <div ref={containerRef} className="h-[640px] rounded-2xl border border-border/60 bg-[#0b1322]" />
+  useEffect(() => {
+    if (!networkRef.current) return
+    networkRef.current.fit({ animation: { duration: 250, easingFunction: 'easeInOutQuad' } })
+  }, [fitTrigger])
+
+  return <div ref={containerRef} className="h-[680px] rounded-lg border border-white/8 bg-[#0b0e14]" />
 }
