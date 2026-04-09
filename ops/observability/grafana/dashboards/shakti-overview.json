@@ -24,7 +24,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "PBFA97CFB590B2093"
+        "uid": "shakti-prometheus"
       },
       "fieldConfig": {
         "defaults": {
@@ -59,7 +59,7 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(shakti_http_requests_total[5m]))",
+          "expr": "sum(rate(shakti_http_requests_total[$__rate_interval])) or on() vector(0)",
           "refId": "A"
         }
       ],
@@ -69,7 +69,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "PBFA97CFB590B2093"
+        "uid": "shakti-prometheus"
       },
       "fieldConfig": {
         "defaults": {
@@ -102,7 +102,7 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum(rate(shakti_http_request_duration_seconds_bucket[5m])) by (le))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(shakti_http_request_duration_seconds_bucket[$__rate_interval]))) or on() vector(0)",
           "refId": "A"
         }
       ],
@@ -112,7 +112,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "PBFA97CFB590B2093"
+        "uid": "shakti-prometheus"
       },
       "fieldConfig": {
         "defaults": {
@@ -144,7 +144,7 @@
       },
       "targets": [
         {
-          "expr": "shakti_http_requests_active",
+          "expr": "sum(shakti_http_requests_active) or on() vector(0)",
           "refId": "A"
         }
       ],
@@ -154,7 +154,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "PBFA97CFB590B2093"
+        "uid": "shakti-prometheus"
       },
       "fieldConfig": {
         "defaults": {
@@ -175,7 +175,7 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(shakti_http_requests_total[5m])) by (route)",
+          "expr": "sum by (route) (rate(shakti_http_requests_total[$__rate_interval]))",
           "legendFormat": "{{route}}",
           "refId": "A"
         }
@@ -186,15 +186,17 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "PBFA97CFB590B2093"
+        "uid": "shakti-prometheus"
       },
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "palette-classic" }
+          "color": { "mode": "palette-classic" },
+          "unit": "percentunit",
+          "min": 0
         },
         "overrides": []
       },
-      "gridPos": { "h": 10, "w": 12, "x": 12, "y": 8 },
+      "gridPos": { "h": 10, "w": 6, "x": 12, "y": 8 },
       "id": 5,
       "options": {
         "legend": {
@@ -207,17 +209,46 @@
       },
       "targets": [
         {
-          "expr": "rate(process_cpu_seconds_total[5m])",
-          "legendFormat": "CPU",
+          "expr": "rate(shakti_backend_process_cpu_seconds_total[$__rate_interval]) or on() vector(0)",
+          "legendFormat": "CPU usage",
           "refId": "A"
-        },
-        {
-          "expr": "process_resident_memory_bytes",
-          "legendFormat": "RSS Memory",
-          "refId": "B"
         }
       ],
-      "title": "Backend Process Health",
+      "title": "Backend CPU Usage",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "shakti-prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "unit": "bytes",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 10, "w": 6, "x": 18, "y": 8 },
+      "id": 6,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "expr": "shakti_backend_process_resident_memory_bytes or on() vector(0)",
+          "legendFormat": "RSS memory",
+          "refId": "A"
+        }
+      ],
+      "title": "Backend RSS Memory",
       "type": "timeseries"
     }
   ],
@@ -229,7 +260,7 @@
     "list": []
   },
   "time": {
-    "from": "now-1h",
+    "from": "now-15m",
     "to": "now"
   },
   "timepicker": {},
