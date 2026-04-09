@@ -10,6 +10,7 @@ import {
   getCaseModuleSummary,
   searchCasesForChat
 } from '../services/chatbot/caseContext.service.js';
+import { buildTimelineTimestamp } from '../utils/timestamps.js';
 
 const router = Router();
 
@@ -27,6 +28,51 @@ function generateCaseNumber(caseName) {
 }
 
 const isBlank = (value) => String(value ?? '').trim() === '';
+
+const sqlTimestampFromDateAndTime = (dateColumn, timeColumn) => `
+  CASE
+    WHEN ${dateColumn} IS NULL OR ${timeColumn} IS NULL THEN NULL
+    WHEN ${dateColumn} ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+      AND ${timeColumn} ~ '^[0-9]{1,2}:[0-9]{2}(:[0-9]{2})?$'
+    THEN (
+      ${dateColumn} || ' ' ||
+      CASE
+        WHEN ${timeColumn} ~ '^[0-9]{1,2}:[0-9]{2}$' THEN ${timeColumn} || ':00'
+        ELSE ${timeColumn}
+      END || '+05:30'
+    )::timestamptz
+    WHEN ${dateColumn} ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+      AND ${timeColumn} ~* '^[0-9]{1,2}:[0-9]{2}(:[0-9]{2})?\\s*(AM|PM)$'
+    THEN to_timestamp(
+      ${dateColumn} || ' ' || upper(${timeColumn}),
+      CASE
+        WHEN ${timeColumn} ~* ':[0-9]{2}\\s*(AM|PM)$' THEN 'YYYY-MM-DD HH12:MI:SS AM'
+        ELSE 'YYYY-MM-DD HH12:MI AM'
+      END
+    )::timestamptz
+    ELSE NULL
+  END
+`;
+
+const sqlTimestampFromText = (column) => `
+  CASE
+    WHEN ${column} IS NULL OR btrim(${column}) = '' THEN NULL
+    WHEN ${column} ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{1,2}:[0-9]{2}(:[0-9]{2})?([.][0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$'
+      THEN ${column}::timestamptz
+    WHEN ${column} ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}[ T][0-9]{1,2}:[0-9]{2}(:[0-9]{2})?$'
+      THEN (replace(${column}, 'T', ' ') || '+05:30')::timestamptz
+    ELSE NULL
+  END
+`;
+
+const sqlTimestampFromDate = (column) => `
+  CASE
+    WHEN ${column} IS NULL OR btrim(${column}) = '' THEN NULL
+    WHEN ${column} ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+      THEN (${column} || 'T00:00:00+05:30')::timestamptz
+    ELSE NULL
+  END
+`;
 
 /* ── GET /api/cases — list officer's cases ── */
 router.get('/', authenticateToken, async (req, res) => {
@@ -255,6 +301,11 @@ router.get('/:id/timeline', authenticateToken, requireCaseAccess('viewer'), asyn
   try {
     const limit = Math.max(50, Math.min(1000, Number(req.query.limit || 300)));
     const caseId = Number(req.params.id);
+    const cdrEventTimeSql = sqlTimestampFromDateAndTime('cdr.call_date', 'cdr.call_time');
+    const ipdrEventTimeSql = sqlTimestampFromText('ipdr.start_time');
+    const ildEventTimeSql = sqlTimestampFromDateAndTime('ild.call_date', 'ild.call_time');
+    const sdrEventTimeSql = sqlTimestampFromDate('sdr.activation_date');
+    const towerEventTimeSql = `COALESCE(tower.start_time, ${sqlTimestampFromDateAndTime('tower.call_date', 'tower.call_time')})`;
 
     const result = await pool.query(
       `
@@ -262,7 +313,7 @@ router.get('/:id/timeline', authenticateToken, requireCaseAccess('viewer'), asyn
           SELECT
             'cdr'::text AS source,
             cdr.id::text AS source_id,
-            cdr.date_time AS event_time,
+            COALESCE(cdr.date_time, ${cdrEventTimeSql}) AS event_time,
             cdr.calling_number AS primary_value,
             cdr.called_number AS secondary_value,
             cdr.call_type AS event_type,
@@ -272,7 +323,11 @@ router.get('/:id/timeline', authenticateToken, requireCaseAccess('viewer'), asyn
               'duration_sec', COALESCE(cdr.duration_sec, cdr.duration),
               'operator', cdr.operator,
               'file_id', cdr.file_id
-            ) AS details
+            ) AS details,
+            cdr.call_date AS fallback_date,
+            cdr.call_time AS fallback_time,
+            NULL::text AS fallback_timestamp,
+            cdr.created_at AS created_at
           FROM cdr_records cdr
           WHERE cdr.case_id = $1
 
@@ -281,7 +336,7 @@ router.get('/:id/timeline', authenticateToken, requireCaseAccess('viewer'), asyn
           SELECT
             'ipdr'::text AS source,
             ipdr.id::text AS source_id,
-            NULL::timestamp AS event_time,
+            ${ipdrEventTimeSql} AS event_time,
             ipdr.msisdn AS primary_value,
             ipdr.source_ip AS secondary_value,
             COALESCE(ipdr.protocol, ipdr.domain_name, 'session') AS event_type,
@@ -292,7 +347,11 @@ router.get('/:id/timeline', authenticateToken, requireCaseAccess('viewer'), asyn
               'start_time', ipdr.start_time,
               'operator', ipdr.operator,
               'file_id', ipdr.file_id
-            ) AS details
+            ) AS details,
+            NULL::text AS fallback_date,
+            NULL::text AS fallback_time,
+            ipdr.start_time AS fallback_timestamp,
+            ipdr.created_at AS created_at
           FROM ipdr_records ipdr
           WHERE ipdr.case_id = $1
 
@@ -301,7 +360,7 @@ router.get('/:id/timeline', authenticateToken, requireCaseAccess('viewer'), asyn
           SELECT
             'ild'::text AS source,
             ild.id::text AS source_id,
-            ild.date_time AS event_time,
+            COALESCE(ild.date_time, ${ildEventTimeSql}) AS event_time,
             COALESCE(ild.calling_number, ild.calling_party) AS primary_value,
             COALESCE(ild.called_number, ild.called_party) AS secondary_value,
             COALESCE(ild.call_direction, ild.call_type, 'ild') AS event_type,
@@ -312,7 +371,11 @@ router.get('/:id/timeline', authenticateToken, requireCaseAccess('viewer'), asyn
               'destination_country', ild.destination_country,
               'operator', ild.operator,
               'file_id', ild.file_id
-            ) AS details
+            ) AS details,
+            ild.call_date AS fallback_date,
+            ild.call_time AS fallback_time,
+            NULL::text AS fallback_timestamp,
+            ild.created_at AS created_at
           FROM ild_records ild
           WHERE ild.case_id = $1
 
@@ -321,7 +384,7 @@ router.get('/:id/timeline', authenticateToken, requireCaseAccess('viewer'), asyn
           SELECT
             'sdr'::text AS source,
             sdr.id::text AS source_id,
-            NULL::timestamp AS event_time,
+            ${sdrEventTimeSql} AS event_time,
             sdr.msisdn AS primary_value,
             sdr.subscriber_name AS secondary_value,
             'subscriber_profile'::text AS event_type,
@@ -331,7 +394,11 @@ router.get('/:id/timeline', authenticateToken, requireCaseAccess('viewer'), asyn
               'id_proof_number', sdr.id_proof_number,
               'operator', sdr.operator,
               'file_id', sdr.file_id
-            ) AS details
+            ) AS details,
+            sdr.activation_date AS fallback_date,
+            NULL::text AS fallback_time,
+            NULL::text AS fallback_timestamp,
+            sdr.created_at AS created_at
           FROM sdr_records sdr
           WHERE sdr.case_id = $1
 
@@ -340,7 +407,7 @@ router.get('/:id/timeline', authenticateToken, requireCaseAccess('viewer'), asyn
           SELECT
             'tower'::text AS source,
             tower.id::text AS source_id,
-            tower.start_time AS event_time,
+            ${towerEventTimeSql} AS event_time,
             tower.a_party AS primary_value,
             tower.b_party AS secondary_value,
             COALESCE(tower.call_type, 'tower_activity') AS event_type,
@@ -350,7 +417,11 @@ router.get('/:id/timeline', authenticateToken, requireCaseAccess('viewer'), asyn
               'imsi', tower.imsi,
               'operator', tower.operator,
               'file_id', tower.file_id
-            ) AS details
+            ) AS details,
+            tower.call_date AS fallback_date,
+            tower.call_time AS fallback_time,
+            tower.start_time::text AS fallback_timestamp,
+            tower.created_at AS created_at
           FROM tower_dump_records tower
           WHERE tower.case_id = $1
         )
@@ -362,7 +433,45 @@ router.get('/:id/timeline', authenticateToken, requireCaseAccess('viewer'), asyn
       [caseId, limit]
     );
 
-    res.json({ events: result.rows, limit });
+    const events = result.rows
+      .map((row) => {
+        const {
+          fallback_date: fallbackDate,
+          fallback_time: fallbackTime,
+          fallback_timestamp: fallbackTimestamp,
+          created_at: createdAt,
+          ...event
+        } = row;
+
+        const resolvedEventTime = buildTimelineTimestamp({
+          eventTime: event.event_time,
+          fallbackDate,
+          fallbackTime,
+          fallbackTimestamp,
+        });
+
+        return {
+          ...event,
+          event_time: resolvedEventTime,
+          _sort_event_time: resolvedEventTime ? new Date(resolvedEventTime).getTime() : Number.NEGATIVE_INFINITY,
+          _created_at: createdAt ? new Date(createdAt).getTime() : Number.NEGATIVE_INFINITY,
+        };
+      })
+      .sort((left, right) => {
+        if (right._sort_event_time !== left._sort_event_time) {
+          return right._sort_event_time - left._sort_event_time;
+        }
+        if (right._created_at !== left._created_at) {
+          return right._created_at - left._created_at;
+        }
+        if (left.source !== right.source) {
+          return left.source.localeCompare(right.source);
+        }
+        return Number(right.source_id) - Number(left.source_id);
+      })
+      .map(({ _sort_event_time, _created_at, ...event }) => event);
+
+    res.json({ events, limit });
   } catch (err) {
     console.error('Case timeline error:', err);
     res.status(500).json({ error: 'Failed to fetch case timeline' });

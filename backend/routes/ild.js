@@ -2,6 +2,7 @@
 import { Router } from 'express';
 import pool from '../config/database.js';
 import { authenticateToken } from '../middleware/auth.js';
+import { combineDateAndTime, normalizeDateString, normalizeTimeString } from '../utils/timestamps.js';
 
 const router = Router();
 const toInt = (v) => { const n = Number(v); return Number.isFinite(n) ? Math.trunc(n) : null; };
@@ -80,11 +81,14 @@ router.post('/records', authenticateToken, async (req, res) => {
       const values = [];
       const placeholders = batch.map((r, idx) => {
         const rawData = r.raw_data && typeof r.raw_data === 'object' ? r.raw_data : r;
+        const normalizedCallDate = normalizeDateString(r.call_date);
+        const normalizedCallTime = normalizeTimeString(r.call_time) || r.call_time || null;
+        const normalizedDateTime = combineDateAndTime(r.call_date, r.call_time);
         values.push(
           parsedCaseId, r.file_id || fileId || null,
           r.calling_party || r.calling_number || r.calling_party_number || null,
           r.called_party || r.called_number || r.called_party_number || null,
-          r.call_date || null, r.call_time || null,
+          normalizedCallDate, normalizedCallTime, normalizedDateTime,
           r.call_type || null, r.call_direction || null,
           (r.duration_sec || r.call_duration_sec) ? parseInt(String(r.duration_sec || r.call_duration_sec), 10) || 0 : 0,
           r.international_num || r.called_party_number || null, r.country_code || null,
@@ -93,14 +97,14 @@ router.post('/records', authenticateToken, async (req, res) => {
           r.operator || r.carrier || r.operator_name || null, r.roaming_circle || r.circle || null,
           JSON.stringify(rawData || {})
         );
-        const offset = idx * 17;
-        return `(${Array.from({ length: 17 }, (_, j) => `$${offset + j + 1}`).join(', ')})`;
+        const offset = idx * 18;
+        return `(${Array.from({ length: 18 }, (_, j) => `$${offset + j + 1}`).join(', ')})`;
       }).join(', ');
 
       await pool.query(
         `INSERT INTO ild_records (
            case_id, file_id, calling_party, called_party,
-           call_date, call_time, call_type, call_direction,
+           call_date, call_time, date_time, call_type, call_direction,
            duration_sec, international_num, country_code,
            destination_country, imei, cell_id,
            operator, roaming_circle, raw_data

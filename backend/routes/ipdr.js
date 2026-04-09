@@ -2,6 +2,7 @@
 import { Router } from 'express';
 import pool from '../config/database.js';
 import { authenticateToken } from '../middleware/auth.js';
+import { parseLooseTimestamp } from '../utils/timestamps.js';
 
 const router = Router();
 const toInt = (v) => { const n = Number(v); return Number.isFinite(n) ? Math.trunc(n) : null; };
@@ -184,6 +185,19 @@ router.post('/records', authenticateToken, async (req, res) => {
       const values = [];
       const placeholders = batch.map((r, idx) => {
         const rawData = r.raw_data && typeof r.raw_data === 'object' ? r.raw_data : r;
+        const normalizedStartTime =
+          parseLooseTimestamp(r.start_time || r.session_start_time || r.event_start_time || r.allocation_start_time)
+          || r.start_time
+          || r.session_start_time
+          || r.event_start_time
+          || r.allocation_start_time
+          || null;
+        const normalizedEndTime =
+          parseLooseTimestamp(r.end_time || r.session_end_time || r.allocation_end_time)
+          || r.end_time
+          || r.session_end_time
+          || r.allocation_end_time
+          || null;
         values.push(
           parsedCaseId, r.file_id || fileId || null,
           r.source_ip || null, r.destination_ip || null,
@@ -197,8 +211,8 @@ router.post('/records', authenticateToken, async (req, res) => {
           toInt(r.uplink_volume || r.data_volume_uplink),
           toInt(r.downlink_volume || r.data_volume_downlink),
           toInt(r.total_volume || ((toInt(r.uplink_volume || r.data_volume_uplink) || 0) + (toInt(r.downlink_volume || r.data_volume_downlink) || 0))),
-          r.start_time || r.session_start_time || r.event_start_time || r.allocation_start_time || null,
-          r.end_time || r.session_end_time || r.allocation_end_time || null,
+          normalizedStartTime,
+          normalizedEndTime,
           toInt(r.duration || r.duration_sec),
           r.cell_id || r.first_cell_id || r.cgi || null,
           r.lac || null,

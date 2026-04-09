@@ -2,6 +2,7 @@
 import { Router } from 'express';
 import pool from '../config/database.js';
 import { authenticateToken } from '../middleware/auth.js';
+import { combineDateAndTime, normalizeDateString, normalizeTimeString, parseLooseTimestamp } from '../utils/timestamps.js';
 
 const router = Router();
 const toInt = (v) => { const n = Number(v); return Number.isFinite(n) ? Math.trunc(n) : null; };
@@ -79,11 +80,16 @@ router.post('/records', authenticateToken, async (req, res) => {
       const values = [];
       const placeholders = batch.map((r, idx) => {
         const rawData = r.raw_data && typeof r.raw_data === 'object' ? r.raw_data : r;
+        const normalizedCallDate = normalizeDateString(r.call_date);
+        const normalizedCallTime = normalizeTimeString(r.call_time || r.call_start_time) || r.call_time || r.call_start_time || null;
+        const normalizedStartTime =
+          parseLooseTimestamp(r.start_time)
+          || combineDateAndTime(r.call_date, r.call_time || r.call_start_time);
         values.push(
           parsedCaseId, r.file_id || fileId || null,
           r.a_party || null, r.b_party || null,
-          r.call_date || null, r.call_time || r.call_start_time || null,
-          r.start_time || r.call_start_time || r.call_time || null,
+          normalizedCallDate, normalizedCallTime,
+          normalizedStartTime,
           r.call_type || null,
           r.duration_sec ? parseInt(String(r.duration_sec), 10) || 0 : 0,
           r.imei || null, r.imsi || null,

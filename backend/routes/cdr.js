@@ -2,35 +2,13 @@
 import { Router } from 'express';
 import pool from '../config/database.js';
 import { authenticateToken } from '../middleware/auth.js';
+import { combineDateAndTime, normalizeDateString, normalizeTimeString } from '../utils/timestamps.js';
 
 const router = Router();
 
 const toInt = (value) => {
   const num = Number(value);
   return Number.isFinite(num) ? Math.trunc(num) : null;
-};
-
-const parseDate = (dateStr) => {
-  if (!dateStr || dateStr === '-') return null;
-  const match1 = String(dateStr).match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
-  if (match1) {
-    const [, day, month, year] = match1;
-    return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
-  }
-  const match2 = String(dateStr).match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
-  if (match2) {
-    const [, year, month, day] = match2;
-    return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
-  }
-  const months = { jan:'01',feb:'02',mar:'03',apr:'04',may:'05',jun:'06',jul:'07',aug:'08',sep:'09',oct:'10',nov:'11',dec:'12' };
-  const match3 = String(dateStr).match(/^(\d{1,2})-([A-Za-z]{3})-(\d{2,4})$/);
-  if (match3) {
-    const [, day, monthStr, yearStr] = match3;
-    const month = months[monthStr.toLowerCase()] || '01';
-    const year = yearStr.length === 2 ? `20${yearStr}` : yearStr;
-    return `${year}-${month}-${day.padStart(2, '0')}`;
-  }
-  return null;
 };
 
 const updateUploadedFileProgress = async (fileId, inserted) => {
@@ -140,14 +118,17 @@ router.post('/records', authenticateToken, async (req, res) => {
         const durationSec = record.duration_sec || record.duration ? parseInt(String(record.duration_sec || record.duration), 10) || 0 : 0;
         const recordFileId = record.file_id || fileId || null;
         const rawData = record.raw_data && typeof record.raw_data === 'object' ? record.raw_data : record;
+        const normalizedCallDate = normalizeDateString(record.call_date);
+        const normalizedCallTime = normalizeTimeString(record.call_time || record.call_start_time || record.toc) || record.call_time || record.call_start_time || record.toc || null;
+        const normalizedDateTime = combineDateAndTime(record.call_date, record.call_time || record.call_start_time || record.toc);
         const latitude = record.lat != null ? parseFloat(record.lat) : (record.first_cell_lat != null ? parseFloat(record.first_cell_lat) : null);
         const longitude = record.long != null ? parseFloat(record.long) : (record.first_cell_long != null ? parseFloat(record.first_cell_long) : null);
         values.push(
           parsedCaseId, recordFileId,
           record.calling_number || record.a_party || '',
           record.called_number || record.b_party || null,
-          record.call_type || null, record.call_time || record.call_start_time || record.toc || null,
-          parseDate(record.call_date), durationSec,
+          record.call_type || null, normalizedCallTime,
+          normalizedCallDate, normalizedDateTime, durationSec,
           record.first_cell_id || null, record.last_cell_id || null,
           record.imei_a || record.imei || null,
           record.imei_b || null,
@@ -158,14 +139,14 @@ router.post('/records', authenticateToken, async (req, res) => {
           longitude,
           JSON.stringify(rawData || {})
         );
-        const offset = index * 19;
-        return `(${Array.from({ length: 19 }, (_, j) => `$${offset + j + 1}`).join(', ')})`;
+        const offset = index * 20;
+        return `(${Array.from({ length: 20 }, (_, j) => `$${offset + j + 1}`).join(', ')})`;
       }).join(', ');
 
       await pool.query(
         `INSERT INTO cdr_records (
            case_id, file_id, calling_number, called_number,
-           call_type, call_time, call_date, duration_sec,
+           call_type, call_time, call_date, date_time, duration_sec,
            first_cell_id, last_cell_id, imei_a, imei_b,
            cell_id_a, cell_id_b, roaming, operator, lat, long, raw_data
          ) VALUES ${placeholders}`,
