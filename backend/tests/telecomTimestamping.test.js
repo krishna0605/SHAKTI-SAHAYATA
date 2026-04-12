@@ -52,8 +52,9 @@ describe('telecom ingest timestamp normalization', () => {
       });
 
     expect(response.status).toBe(200);
-    expect(queryMock).toHaveBeenCalledTimes(1);
-    const [, params] = queryMock.mock.calls[0];
+    const insertCall = queryMock.mock.calls.find(([sql]) => String(sql).includes('INSERT INTO cdr_records'));
+    expect(insertCall).toBeTruthy();
+    const [, params] = insertCall;
     expect(params[5]).toBe('13:13:37');
     expect(params[6]).toBe('2025-06-30');
     expect(params[7]).toBe('2025-06-30T13:13:37+05:30');
@@ -76,7 +77,9 @@ describe('telecom ingest timestamp normalization', () => {
       });
 
     expect(response.status).toBe(200);
-    const [, params] = queryMock.mock.calls[0];
+    const insertCall = queryMock.mock.calls.find(([sql]) => String(sql).includes('INSERT INTO ild_records'));
+    expect(insertCall).toBeTruthy();
+    const [, params] = insertCall;
     expect(params[4]).toBe('2025-06-30');
     expect(params[5]).toBe('00:13:37');
     expect(params[6]).toBe('2025-06-30T00:13:37+05:30');
@@ -98,7 +101,9 @@ describe('telecom ingest timestamp normalization', () => {
       });
 
     expect(response.status).toBe(200);
-    const [, params] = queryMock.mock.calls[0];
+    const insertCall = queryMock.mock.calls.find(([sql]) => String(sql).includes('INSERT INTO tower_dump_records'));
+    expect(insertCall).toBeTruthy();
+    const [, params] = insertCall;
     expect(params[4]).toBe('2025-06-30');
     expect(params[5]).toBe('00:00:46');
     expect(params[6]).toBe('2025-06-30T00:00:46+05:30');
@@ -120,7 +125,9 @@ describe('telecom ingest timestamp normalization', () => {
       });
 
     expect(response.status).toBe(200);
-    const [, params] = queryMock.mock.calls[0];
+    const insertCall = queryMock.mock.calls.find(([sql]) => String(sql).includes('INSERT INTO ipdr_records'));
+    expect(insertCall).toBeTruthy();
+    const [, params] = insertCall;
     expect(params[17]).toBe('2025-06-30T00:13:37+05:30');
     expect(params[18]).toBe('2025-06-30T13:13:37+05:30');
   });

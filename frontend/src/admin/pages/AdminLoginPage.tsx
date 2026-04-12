@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge'
 import { adminAuthAPI } from '../lib/api'
 import { adminPaths, buildMainAppUrl } from '../lib/paths'
 import { useAdminAuthStore } from '../store/adminAuthStore'
+import { isSupabaseConfigured, signInWithSupabasePassword } from '../../lib/supabase'
 
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : 'Admin login failed. Please try again.'
@@ -35,7 +36,24 @@ export default function AdminLoginPage() {
     setLoading(true)
 
     try {
-      const data = await adminAuthAPI.loginWithTotp(email.trim().toLowerCase(), password, totpCode.trim())
+      const normalizedEmail = email.trim().toLowerCase()
+      const data = isSupabaseConfigured
+        ? await (async () => {
+            await signInWithSupabasePassword(normalizedEmail, password)
+            const bootstrap = await adminAuthAPI.bootstrap()
+            if (!bootstrap?.authenticated || !bootstrap.accessToken || !bootstrap.admin) {
+              throw new Error('This Supabase account is not linked to an active SHAKTI admin profile.')
+            }
+
+            const reauth = await adminAuthAPI.reauthenticate(password, totpCode.trim() || undefined)
+            return {
+              accessToken: reauth.accessToken || bootstrap.accessToken,
+              session: reauth.session ?? bootstrap.session,
+              admin: bootstrap.admin,
+            }
+          })()
+        : await adminAuthAPI.loginWithTotp(normalizedEmail, password, totpCode.trim())
+
       setAuth(data.accessToken, data.admin, data.session)
       navigate(data.admin.mustChangePassword ? adminPaths.forcePasswordChange : adminPaths.home, { replace: true })
     } catch (error: unknown) {

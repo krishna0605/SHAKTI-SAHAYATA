@@ -1,6 +1,31 @@
 import { verifyAdminAccessToken } from '../../config/adminAuth.js';
+import { verifySupabaseAccessToken } from '../../config/supabase.js';
+import { getAdminProfileByAuthUserId, mapAdminIdentity } from '../../services/auth/authIdentity.service.js';
 
-export function authenticateAdminToken(req, res, next) {
+const resolveSupabaseAdmin = async (token) => {
+  const claims = await verifySupabaseAccessToken(token);
+  const profile = await getAdminProfileByAuthUserId(claims.sub);
+  if (!profile || !profile.is_active) {
+    return null;
+  }
+
+  return {
+    adminId: profile.id,
+    email: profile.email,
+    fullName: profile.full_name,
+    role: profile.role,
+    permissions: Array.isArray(profile.permissions) ? profile.permissions : [],
+    accountType: 'it_admin',
+    authType: 'supabase',
+    authUserId: claims.sub,
+    claims,
+    profile: mapAdminIdentity(profile),
+    sessionId: claims.session_id || claims.sessionId || null,
+    recentAuthAt: claims.recent_auth_at || claims.recentAuthAt || null,
+  };
+};
+
+export async function authenticateAdminToken(req, res, next) {
   const authHeader = req.headers.authorization;
   const token = authHeader && authHeader.split(' ')[1];
 
@@ -15,8 +40,24 @@ export function authenticateAdminToken(req, res, next) {
     }
 
     req.admin = decoded;
+    req.authToken = token;
+    req.authType = 'legacy';
     next();
   } catch (error) {
+    try {
+      const resolvedAdmin = await resolveSupabaseAdmin(token);
+      if (resolvedAdmin) {
+        req.admin = resolvedAdmin;
+        req.authToken = token;
+        req.authType = 'supabase';
+        return next();
+      }
+    } catch (supabaseError) {
+      if (supabaseError.name === 'JWTExpired' || supabaseError.code === 'ERR_JWT_EXPIRED') {
+        return res.status(401).json({ error: 'Admin token expired, please sign in again' });
+      }
+    }
+
     if (error.name === 'TokenExpiredError') {
       return res.status(401).json({ error: 'Admin token expired, please refresh' });
     }

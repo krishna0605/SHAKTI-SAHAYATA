@@ -14,6 +14,8 @@ const ROLE_PERMISSIONS = {
     'export_files',
     'view_export_history',
     'manage_storage_governance',
+    'view_officer_roster',
+    'manage_officer_roster',
   ]),
   it_auditor: new Set([
     'console_access',
@@ -22,6 +24,7 @@ const ROLE_PERMISSIONS = {
     'export_overview',
     'export_activity',
     'view_export_history',
+    'view_officer_roster',
   ]),
 };
 

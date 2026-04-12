@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { ApiError, apiClient, clearAccessToken, registerAuthFailureHandler, setAccessToken } from '../lib/apiClient'
+import { isSupabaseConfigured } from '../lib/supabase'
 
 interface User {
   id: number
@@ -61,7 +62,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         user?: User
         session?: { id: string | null; startedAt: string | null } | null
       }>('/auth/bootstrap', {
-        auth: false,
+        auth: isSupabaseConfigured,
         redirectOn401: false,
         retryOn401: false,
       })

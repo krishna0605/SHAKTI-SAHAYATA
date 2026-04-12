@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import jwt from 'jsonwebtoken';
+import { isSupabaseAuthEnabled } from './supabase.js';
 
 const INSECURE_JWT_SECRETS = new Set([
   '',
@@ -13,7 +14,13 @@ const INSECURE_JWT_SECRETS = new Set([
 ]);
 
 const jwtSecret = String(process.env.JWT_SECRET || '').trim();
-if (!jwtSecret || jwtSecret.length < 32 || INSECURE_JWT_SECRETS.has(jwtSecret)) {
+const legacyJwtEnabled = Boolean(
+  jwtSecret
+  && jwtSecret.length >= 32
+  && !INSECURE_JWT_SECRETS.has(jwtSecret)
+);
+
+if (!legacyJwtEnabled && !isSupabaseAuthEnabled) {
   throw new Error(
     '[AUTH] JWT_SECRET is required, must be at least 32 characters, and cannot use the documented placeholder value.'
   );
@@ -42,6 +49,8 @@ export const REFRESH_COOKIE_SECURE =
 
 export const AUTH_CONFIG = {
   jwtSecret,
+  legacyJwtEnabled,
+  provider: isSupabaseAuthEnabled ? 'supabase' : 'legacy-jwt',
   accessTokenTtl: ACCESS_TOKEN_TTL,
   refreshTokenTtlDays: REFRESH_TOKEN_TTL_DAYS,
   refreshCookieName: REFRESH_COOKIE_NAME,
@@ -50,17 +59,21 @@ export const AUTH_CONFIG = {
 };
 
 export const signAccessToken = (user) =>
-  jwt.sign(
-    {
-      userId: user.id,
-      buckleId: user.buckle_id,
-      email: user.email,
-      fullName: user.full_name,
-      role: user.role
-    },
-    AUTH_CONFIG.jwtSecret,
-    { expiresIn: AUTH_CONFIG.accessTokenTtl }
-  );
+  legacyJwtEnabled
+    ? jwt.sign(
+      {
+        userId: user.id,
+        buckleId: user.buckle_id,
+        email: user.email,
+        fullName: user.full_name,
+        role: user.role
+      },
+      AUTH_CONFIG.jwtSecret,
+      { expiresIn: AUTH_CONFIG.accessTokenTtl }
+    )
+    : (() => {
+      throw new Error('Legacy JWT signing is disabled while Supabase Auth is active.');
+    })();
 
 export const decodeAccessTokenExpiry = (token) => {
   const decoded = jwt.decode(token);
@@ -68,7 +81,12 @@ export const decodeAccessTokenExpiry = (token) => {
   return new Date(decoded.exp * 1000).toISOString();
 };
 
-export const verifyAccessToken = (token) => jwt.verify(token, AUTH_CONFIG.jwtSecret);
+export const verifyAccessToken = (token) => {
+  if (!legacyJwtEnabled) {
+    throw new Error('Legacy JWT verification is disabled while Supabase Auth is active.');
+  }
+  return jwt.verify(token, AUTH_CONFIG.jwtSecret);
+};
 
 export const buildRefreshCookieOptions = () => ({
   httpOnly: true,

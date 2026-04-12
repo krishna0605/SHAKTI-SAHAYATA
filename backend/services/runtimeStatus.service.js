@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import pool from '../config/database.js';
 import { AUTH_CONFIG } from '../config/auth.js';
+import { isSupabaseAuthEnabled } from '../config/supabase.js';
 import { getOllamaRuntimeConfig } from './chatbot/config.js';
 import { isOllamaAvailable } from './chatbot/ollama.service.js';
 
@@ -105,10 +106,10 @@ export const runStartupSelfChecks = async ({
   }
 
   try {
-    if (!AUTH_CONFIG.jwtSecret || AUTH_CONFIG.jwtSecret.length < 32) {
-      throw new Error('JWT secret configuration is invalid.');
+    if (!AUTH_CONFIG.legacyJwtEnabled && !isSupabaseAuthEnabled) {
+      throw new Error('Neither legacy JWT nor Supabase Auth is configured.');
     }
-    checks.auth = buildCheck(PASS, 'Auth configuration loaded and validated.');
+    checks.auth = buildCheck(PASS, `Auth configuration loaded and validated (${AUTH_CONFIG.provider}).`);
   } catch (error) {
     checks.auth = buildCheck(FAIL, error?.message || 'Auth configuration invalid');
     failed.push('auth');

@@ -4,6 +4,7 @@ import pool from '../config/database.js';
 import { authenticateToken } from '../middleware/auth.js';
 import { parseLooseTimestamp } from '../utils/timestamps.js';
 import { emitAdminConsoleEvent } from '../services/admin/adminEventStream.service.js';
+import { invalidateCaseMemorySnapshots } from '../services/chatbot/caseMemorySnapshot.service.js';
 
 const router = Router();
 const toInt = (v) => { const n = Number(v); return Number.isFinite(n) ? Math.trunc(n) : null; };
@@ -246,6 +247,7 @@ router.post('/records', authenticateToken, async (req, res) => {
       inserted += batch.length;
     }
     await updateUploadedFileProgress(fileId, inserted);
+    await invalidateCaseMemorySnapshots({ caseId: parsedCaseId, module: 'ipdr' });
     emitIngestionCompletionEvents({ caseId: parsedCaseId, fileId: toInt(fileId), inserted, module: 'ipdr' });
     res.json({ inserted });
   } catch (error) {

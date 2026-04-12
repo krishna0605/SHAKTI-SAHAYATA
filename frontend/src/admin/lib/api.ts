@@ -1,5 +1,6 @@
 import { ApiError, resolveBackendBaseUrl } from '../../lib/apiClient'
 import { adminApiClient, getAdminAccessToken } from './adminApiClient'
+import { isSupabaseConfigured, signOutSupabase } from '../../lib/supabase'
 import type {
   ActivityFeedResponse,
   AdminAlertAcknowledgementResponse,
@@ -14,6 +15,9 @@ import type {
   AdminFileDeletionResponse,
   AdminFilesResponse,
   AdminIdentity,
+  AdminMigrationCleanupReportResponse,
+  AdminOfficerRosterImportResult,
+  AdminOfficerRosterImportsResponse,
   AdminIngestionWorkspaceResponse,
   AdminNormalizationWorkspaceResponse,
   AdminOverviewResponse,
@@ -57,7 +61,13 @@ export const adminAuthAPI = {
   },
 
   async logout() {
-    return adminApiClient.request('/auth/logout', { method: 'POST' })
+    try {
+      return await adminApiClient.request('/auth/logout', { method: 'POST' })
+    } finally {
+      if (isSupabaseConfigured) {
+        await signOutSupabase().catch(() => undefined)
+      }
+    }
   },
 
   async bootstrap() {
@@ -68,7 +78,7 @@ export const adminAuthAPI = {
       session?: AdminSessionInfo | null
       admin?: AdminIdentity
     }>('/auth/bootstrap', {
-      auth: false,
+      auth: isSupabaseConfigured,
       redirectOn401: false,
       retryOn401: false,
     })
@@ -286,6 +296,22 @@ export const adminConsoleAPI = {
     return adminApiClient.request<AdminUsersResponse>('/users')
   },
 
+  async importOfficerRoster(file: File, options: { fullSync?: boolean } = {}) {
+    const body = new FormData()
+    body.append('file', file)
+    body.append('fullSync', String(Boolean(options.fullSync)))
+
+    return adminApiClient.request<AdminOfficerRosterImportResult>('/officer-roster/import', {
+      method: 'POST',
+      body,
+    })
+  },
+
+  async getOfficerRosterImports(limit = 20) {
+    const query = buildSearchParams({ limit })
+    return adminApiClient.request<AdminOfficerRosterImportsResponse>(`/officer-roster/imports?${query}`)
+  },
+
   async getSessions(activeOnly = true) {
     const query = buildSearchParams({ activeOnly })
     return adminApiClient.request<AdminSessionsResponse>(`/sessions?${query}`)
@@ -471,5 +497,29 @@ export const adminConsoleAPI = {
     return adminApiClient.request<SafeBrowsePage>(
       `/database/tables/${encodeURIComponent(table)}/rows${query ? `?${query}` : ''}`
     )
+  },
+
+  async getMigrationCleanupReport() {
+    return adminApiClient.request<AdminMigrationCleanupReportResponse>('/migration-cleanup/report')
+  },
+
+  async runMigrationCleanupInventory() {
+    return adminApiClient.request<AdminMigrationCleanupReportResponse>('/migration-cleanup/inventory', {
+      method: 'POST',
+    })
+  },
+
+  async quarantineMigrationCleanupItems(reportId: string) {
+    return adminApiClient.request<AdminMigrationCleanupReportResponse>('/migration-cleanup/quarantine', {
+      method: 'POST',
+      body: { reportId },
+    })
+  },
+
+  async deleteMigrationCleanupItems(reportId: string) {
+    return adminApiClient.request<AdminMigrationCleanupReportResponse>('/migration-cleanup/delete', {
+      method: 'POST',
+      body: { reportId },
+    })
   },
 }

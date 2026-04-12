@@ -3,11 +3,19 @@ const { Pool } = pg;
 
 // Build pool config: use DATABASE_URL if available, else individual vars
 const buildPoolConfig = () => {
-  const databaseUrl = process.env.DATABASE_URL?.trim();
+  const databaseUrl =
+    process.env.SUPABASE_DB_URL_POOLER?.trim()
+    || process.env.SUPABASE_DB_URL_DIRECT?.trim()
+    || process.env.DATABASE_URL?.trim();
+  const useSsl =
+    String(process.env.DB_SSL || '').trim().toLowerCase() === 'true'
+    || Boolean(process.env.SUPABASE_DB_URL_POOLER?.trim())
+    || Boolean(process.env.SUPABASE_DB_URL_DIRECT?.trim());
 
   if (databaseUrl) {
     return {
       connectionString: databaseUrl,
+      ...(useSsl ? { ssl: { rejectUnauthorized: false } } : {}),
       max: 20,
       idleTimeoutMillis: 30000,
       connectionTimeoutMillis: 10000,
@@ -20,6 +28,7 @@ const buildPoolConfig = () => {
     database: process.env.DB_NAME || 'shakti_db',
     user: process.env.DB_USER || 'shakti_admin',
     password: process.env.DB_PASSWORD || 'localdevpassword',
+    ...(useSsl ? { ssl: { rejectUnauthorized: false } } : {}),
     max: 20,
     idleTimeoutMillis: 30000,
     connectionTimeoutMillis: 10000,

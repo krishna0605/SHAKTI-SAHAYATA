@@ -10,8 +10,16 @@ import {
   setRefreshCookie,
   signAccessToken
 } from '../config/auth.js';
+import { getSupabaseAdminClient, isSupabaseAuthEnabled, verifySupabaseAccessToken } from '../config/supabase.js';
 import { authenticateToken } from '../middleware/auth.js';
 import { checkAccountLockout, recordFailedLogin, resetFailedLogins } from '../middleware/accountLockout.js';
+import { ensureOfficerSupabaseProfile, getOfficerProfileByAuthUserId, mapOfficerIdentity } from '../services/auth/authIdentity.service.js';
+import {
+  normalizeBuckleId,
+  normalizeRosterEmail,
+  normalizeRosterPhoneNumber,
+  validateOfficerRosterCredentials,
+} from '../services/officerRoster.service.js';
 
 const router = Router();
 
@@ -24,6 +32,56 @@ const buildAccessTokenPayload = (user) => {
     accessToken,
     expiresAt: decodeAccessTokenExpiry(accessToken)
   };
+};
+
+const getBearerToken = (req) => {
+  const header = req.headers.authorization;
+  return header && header.split(' ')[1];
+};
+
+const validateOfficerPassword = (password) => {
+  if (String(password || '').length < 8 || !/[A-Z]/.test(password) || !/[0-9]/.test(password)) {
+    return 'Password must be at least 8 characters with 1 uppercase and 1 number.';
+  }
+  return null;
+};
+
+const createSupabaseOfficerUser = async ({
+  buckleId,
+  email,
+  phoneNumber,
+  fullName,
+  password,
+}) => {
+  const adminClient = getSupabaseAdminClient();
+  const { data, error } = await adminClient.auth.admin.createUser({
+    email,
+    password,
+    email_confirm: true,
+    user_metadata: {
+      buckle_id: buckleId,
+      phone_number: phoneNumber,
+      full_name: fullName,
+    },
+    app_metadata: {
+      account_type: 'officer',
+    },
+  });
+
+  if (error) {
+    if (/already registered|already exists|duplicate/i.test(String(error.message || ''))) {
+      const conflict = new Error('Officer account already exists. Please sign in.');
+      conflict.status = 409;
+      throw conflict;
+    }
+    throw error;
+  }
+
+  if (!data?.user?.id) {
+    throw new Error('Supabase did not return a created officer user.');
+  }
+
+  return data.user;
 };
 
 const createSessionRecord = async ({ userId, ipAddress, userAgent }) => {
@@ -114,8 +172,13 @@ const rotateRefreshToken = async ({ existingToken, ipAddress, userAgent }) => {
 
 const getRefreshTokenFromCookie = (req) => req.cookies?.[AUTH_CONFIG.refreshCookieName] || null;
 
-const buildAuthResponse = async ({ user, session, res, refreshToken }) => {
-  const tokenPayload = buildAccessTokenPayload(user);
+const buildAuthResponse = async ({ user, session, res, refreshToken, accessTokenOverride = null }) => {
+  const tokenPayload = accessTokenOverride
+    ? {
+      accessToken: accessTokenOverride,
+      expiresAt: null,
+    }
+    : buildAccessTokenPayload(user);
   if (refreshToken) {
     setRefreshCookie(res, refreshToken);
   }
@@ -139,32 +202,130 @@ const buildAuthResponse = async ({ user, session, res, refreshToken }) => {
   };
 };
 
+const buildSupabaseOfficerBootstrap = async ({ req, res, token, buckleId }) => {
+  const claims = await verifySupabaseAccessToken(token);
+  const user = await getOfficerProfileByAuthUserId(claims.sub);
+
+  if (!user || !user.is_active) {
+    return {
+      authenticated: false,
+      error: 'Your credentials are wrong',
+      status: 401,
+    };
+  }
+
+  if (buckleId && normalizeBuckleId(user.buckle_id) !== normalizeBuckleId(buckleId)) {
+    return {
+      authenticated: false,
+      error: 'Buckle ID is wrong',
+      status: 403,
+    };
+  }
+
+  const payload = await buildAuthResponse({
+    user,
+    session: null,
+    res,
+    accessTokenOverride: token,
+  });
+
+  return {
+    authenticated: true,
+    ...payload,
+  };
+};
+
 /* ── POST /api/auth/signup ── */
 router.post('/signup', async (req, res) => {
   try {
-    const { buckleId, fullName, email, password } = req.body;
-    if (!buckleId || !fullName || !email || !password) {
+    const {
+      buckleId,
+      fullName,
+      email,
+      phoneNumber,
+      password,
+    } = req.body;
+
+    if (!buckleId || !fullName || !email || !phoneNumber || !password) {
       return res.status(400).json({ error: 'All fields are required' });
     }
 
-    const officer = await pool.query(
-      'SELECT * FROM officers WHERE buckle_id = $1 AND is_active = TRUE',
-      [buckleId]
-    );
-    if (officer.rows.length === 0) {
-      return res.status(403).json({ error: 'Unauthorized Buckle ID. Contact your administrator.' });
+    const normalizedBuckleId = normalizeBuckleId(buckleId);
+    const normalizedEmail = normalizeRosterEmail(email);
+    const normalizedPhoneNumber = normalizeRosterPhoneNumber(phoneNumber);
+    const normalizedFullName = String(fullName || '').trim();
+
+    const rosterValidation = await validateOfficerRosterCredentials({
+      buckleId: normalizedBuckleId,
+      email: normalizedEmail,
+      phoneNumber: normalizedPhoneNumber,
+    });
+    if (!rosterValidation.ok) {
+      return res.status(rosterValidation.status).json({ error: rosterValidation.error });
+    }
+
+    const passwordError = validateOfficerPassword(password);
+    if (passwordError) {
+      return res.status(400).json({ error: passwordError });
     }
 
     const existing = await pool.query(
-      'SELECT id FROM users WHERE buckle_id = $1 OR email = $2',
-      [buckleId, email]
+      'SELECT id, auth_user_id FROM users WHERE buckle_id = $1 OR email = $2',
+      [normalizedBuckleId, normalizedEmail]
     );
-    if (existing.rows.length > 0) {
-      return res.status(409).json({ error: 'This Buckle ID or email is already registered.' });
+    if (existing.rows[0]?.auth_user_id) {
+      return res.status(409).json({ error: 'Officer account already exists. Please sign in.' });
     }
 
-    if (password.length < 8 || !/[A-Z]/.test(password) || !/[0-9]/.test(password)) {
-      return res.status(400).json({ error: 'Password must be at least 8 characters with 1 uppercase and 1 number.' });
+    if (isSupabaseAuthEnabled) {
+      let createdUserId = null;
+      try {
+        const authUser = await createSupabaseOfficerUser({
+          buckleId: normalizedBuckleId,
+          email: normalizedEmail,
+          phoneNumber: normalizedPhoneNumber,
+          fullName: normalizedFullName,
+          password,
+        });
+
+        createdUserId = authUser.id;
+        const profile = await ensureOfficerSupabaseProfile({
+          authUserId: authUser.id,
+          buckleId: normalizedBuckleId,
+          fullName: rosterValidation.officer.full_name || normalizedFullName,
+          email: normalizedEmail,
+          phoneNumber: normalizedPhoneNumber,
+        });
+
+        await pool.query(
+          'INSERT INTO audit_logs (user_id, officer_buckle_id, action, resource_type, details) VALUES ($1, $2, $3, $4, $5)',
+          [
+            profile.id,
+            profile.buckle_id,
+            'SUPABASE_SIGNUP',
+            'user',
+            JSON.stringify({ email: normalizedEmail, phoneNumber: normalizedPhoneNumber }),
+          ]
+        );
+
+        return res.status(201).json({
+          signupCompleted: true,
+          message: 'Officer account created successfully. Sign in to continue.',
+          user: {
+            buckleId: profile.buckle_id,
+            email: profile.email,
+            fullName: profile.full_name,
+          },
+        });
+      } catch (error) {
+        if (createdUserId) {
+          await getSupabaseAdminClient().auth.admin.deleteUser(createdUserId).catch(() => undefined);
+        }
+        if (error.status) {
+          return res.status(error.status).json({ error: error.message });
+        }
+        throw error;
+      }
     }
 
     const passwordHash = await bcrypt.hash(password, 12);
@@ -172,7 +333,7 @@ router.post('/signup', async (req, res) => {
       `INSERT INTO users (buckle_id, email, password_hash, full_name)
        VALUES ($1, $2, $3, $4)
        RETURNING id, buckle_id, email, full_name, role`,
-      [buckleId, email, passwordHash, fullName]
+      [normalizedBuckleId, normalizedEmail, passwordHash, rosterValidation.officer.full_name || normalizedFullName]
     );
 
     const user = result.rows[0];
@@ -194,7 +355,7 @@ router.post('/signup', async (req, res) => {
 
     await pool.query(
       'INSERT INTO audit_logs (user_id, officer_buckle_id, action, resource_type, details) VALUES ($1, $2, $3, $4, $5)',
-      [user.id, buckleId, 'SIGNUP', 'user', JSON.stringify({ email })]
+      [user.id, normalizedBuckleId, 'SIGNUP', 'user', JSON.stringify({ email: normalizedEmail, phoneNumber: normalizedPhoneNumber })]
     );
 
     res.status(201).json(await buildAuthResponse({ user, session, res, refreshToken }));
@@ -213,7 +374,10 @@ router.post('/login', async (req, res) => {
       return res.status(400).json({ error: 'All fields are required' });
     }
 
-    const lockout = await checkAccountLockout(buckleId);
+    const normalizedBuckleId = normalizeBuckleId(buckleId);
+    const normalizedEmail = normalizeRosterEmail(email);
+
+    const lockout = await checkAccountLockout(normalizedBuckleId);
     if (lockout.locked) {
       return res.status(423).json({
         error: `Account locked. Try again in ${lockout.minutesLeft} minutes.`
@@ -222,19 +386,19 @@ router.post('/login', async (req, res) => {
 
     const officer = await pool.query(
       'SELECT * FROM officers WHERE buckle_id = $1 AND is_active = TRUE',
-      [buckleId]
+      [normalizedBuckleId]
     );
     if (officer.rows.length === 0) {
-      return res.status(403).json({ error: 'Unauthorized Buckle ID' });
+      return res.status(403).json({ error: 'Buckle ID is wrong' });
     }
 
     const userResult = await pool.query(
       'SELECT * FROM users WHERE buckle_id = $1 AND email = $2',
-      [buckleId, email]
+      [normalizedBuckleId, normalizedEmail]
     );
     if (userResult.rows.length === 0) {
-      await recordFailedLogin(buckleId);
-      return res.status(401).json({ error: 'Invalid credentials' });
+      await recordFailedLogin(normalizedBuckleId);
+      return res.status(401).json({ error: 'Your credentials are wrong' });
     }
 
     const user = userResult.rows[0];
@@ -244,11 +408,11 @@ router.post('/login', async (req, res) => {
 
     const valid = await bcrypt.compare(password, user.password_hash);
     if (!valid) {
-      await recordFailedLogin(buckleId);
-      return res.status(401).json({ error: 'Invalid credentials' });
+      await recordFailedLogin(normalizedBuckleId);
+      return res.status(401).json({ error: 'Your credentials are wrong' });
     }
 
-    await resetFailedLogins(buckleId);
+    await resetFailedLogins(normalizedBuckleId);
 
     const session = await createSessionRecord({
       userId: user.id,
@@ -273,7 +437,7 @@ router.post('/login', async (req, res) => {
 
     await pool.query(
       'INSERT INTO audit_logs (user_id, officer_buckle_id, action, resource_type, ip_address) VALUES ($1, $2, $3, $4, $5)',
-      [user.id, buckleId, 'LOGIN', 'session', req.ip]
+      [user.id, normalizedBuckleId, 'LOGIN', 'session', req.ip]
     );
 
     res.json(await buildAuthResponse({ user, session, res, refreshToken }));
@@ -327,6 +491,20 @@ router.post('/refresh', async (req, res) => {
 /* ── GET /api/auth/bootstrap ── */
 router.get('/bootstrap', async (req, res) => {
   try {
+    const bearerToken = getBearerToken(req);
+    if (bearerToken && isSupabaseAuthEnabled) {
+      const payload = await buildSupabaseOfficerBootstrap({
+        req,
+        res,
+        token: bearerToken,
+        buckleId: req.query?.buckleId || null,
+      });
+      if (payload.error) {
+        return res.status(payload.status || 403).json({ authenticated: false, error: payload.error });
+      }
+      return res.json(payload);
+    }
+
     const rawToken = getRefreshTokenFromCookie(req);
     if (!rawToken) {
       return res.json({ authenticated: false });
@@ -362,6 +540,15 @@ router.get('/bootstrap', async (req, res) => {
 /* ── POST /api/auth/logout ── */
 router.post('/logout', authenticateToken, async (req, res) => {
   try {
+    if (req.authType === 'supabase') {
+      await pool.query(
+        'INSERT INTO audit_logs (user_id, officer_buckle_id, action, resource_type) VALUES ($1, $2, $3, $4)',
+        [req.user.userId, req.user.buckleId, 'SUPABASE_LOGOUT', 'session']
+      );
+      clearRefreshCookie(res);
+      return res.json({ message: 'Logged out successfully' });
+    }
+
     const rawToken = getRefreshTokenFromCookie(req);
     const existingToken = rawToken ? await findRefreshTokenRecord(rawToken) : null;
 
@@ -425,6 +612,10 @@ router.get('/me', authenticateToken, async (req, res) => {
 /* ── GET /api/auth/session ── */
 router.get('/session', authenticateToken, async (req, res) => {
   try {
+    if (req.authType === 'supabase') {
+      return res.json({ id: null, duration_seconds: 0, started_at: null });
+    }
+
     const result = await pool.query(
       `SELECT id, started_at, EXTRACT(EPOCH FROM (NOW() - started_at))::INTEGER as duration_seconds
        FROM sessions WHERE user_id = $1 AND ended_at IS NULL

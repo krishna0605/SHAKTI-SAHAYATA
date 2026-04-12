@@ -1,5 +1,11 @@
 import { resolveBackendBaseUrl, ApiError } from '../../lib/apiClient'
 import { adminPaths } from './paths'
+import {
+  getSupabaseAccessToken,
+  isSupabaseConfigured,
+  refreshSupabaseSession,
+  signOutSupabase,
+} from '../../lib/supabase'
 
 let inMemoryAdminAccessToken: string | null = null
 let adminAuthFailureHandler: (() => void) | null = null
@@ -73,6 +79,20 @@ class AdminApiClient {
 
     refreshPromise = (async () => {
       try {
+        if (isSupabaseConfigured) {
+          const session = await refreshSupabaseSession()
+          const nextToken = session?.access_token ?? null
+          if (!nextToken) {
+            clearAdminAccessToken()
+            adminAuthFailureHandler?.()
+            if (redirectOn401) redirectToAdminLogin()
+            return false
+          }
+
+          setAdminAccessToken(nextToken)
+          return true
+        }
+
         const response = await fetch(`${resolveAdminApiBaseUrl()}/auth/refresh`, {
           method: 'POST',
           credentials: 'include',
@@ -96,6 +116,9 @@ class AdminApiClient {
       } catch (error) {
         if (error instanceof ApiError && error.status === 429) throw error
         clearAdminAccessToken()
+        if (isSupabaseConfigured) {
+          await signOutSupabase().catch(() => undefined)
+        }
         adminAuthFailureHandler?.()
         if (redirectOn401) redirectToAdminLogin()
         return false
@@ -117,7 +140,9 @@ class AdminApiClient {
       retryOn401 = true,
     } = options
 
-    const token = auth ? getAdminAccessToken() : null
+    const token = auth
+      ? (getAdminAccessToken() || (isSupabaseConfigured ? await getSupabaseAccessToken() : null))
+      : null
     const isFormData = typeof FormData !== 'undefined' && body instanceof FormData
 
     const requestHeaders: Record<string, string> = {
@@ -155,6 +180,9 @@ class AdminApiClient {
     if (!response.ok) {
       if (response.status === 401 && redirectOn401) {
         clearAdminAccessToken()
+        if (isSupabaseConfigured) {
+          await signOutSupabase().catch(() => undefined)
+        }
         adminAuthFailureHandler?.()
         redirectToAdminLogin()
       }

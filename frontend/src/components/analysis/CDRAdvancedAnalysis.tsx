@@ -12,6 +12,8 @@ import * as XLSX from 'xlsx-js-style';
 import { encodeSpreadsheetRows } from '../lib/security';
 import { RecordTable } from './RecordTable';
 import { AnalysisTabBar } from './AnalysisTabBar';
+import { useChatbotWorkspaceStore } from '../../stores/chatbotWorkspaceStore';
+import { getMetricUiLabel } from '../../lib/caseQaCatalog';
 
 // --- Types & Constants ---
 
@@ -739,6 +741,8 @@ const applySheetTabColor = (workbook: XLSX.WorkBook, sheetName: string, color: s
 // --- Main Component ---
 
 export const AdvancedAnalytics: React.FC<AdvancedAnalyticsProps> = ({ caseId, caseName, operator, parsedData, fileCount = 1, onBack }) => {
+  const setWorkspaceContext = useChatbotWorkspaceStore((state) => state.setWorkspaceContext);
+  const clearWorkspaceContext = useChatbotWorkspaceStore((state) => state.clearWorkspaceContext);
   const [data, setData] = useState<NormalizedCDR[]>(parsedData || []);
   const [isLoading, setIsLoading] = useState(!parsedData || parsedData.length === 0);
   const [selectedTab, setSelectedTab] = useState<'overview' | 'records' | 'analysis' | 'location'>('overview');
@@ -898,6 +902,21 @@ export const AdvancedAnalytics: React.FC<AdvancedAnalyticsProps> = ({ caseId, ca
     return unique.size || fileCount;
   }, [fileFilteredData, fileCount]);
 
+  const selectedFileIds = useMemo(
+    () => selectedFileKeys
+      .filter((key) => key.startsWith('id:'))
+      .map((key) => Number.parseInt(key.slice(3), 10))
+      .filter((value) => Number.isFinite(value) && value > 0),
+    [selectedFileKeys]
+  );
+
+  const selectedFileNames = useMemo(
+    () => availableFiles
+      .filter((file) => selectedFileKeys.includes(file.key))
+      .map((file) => file.name),
+    [availableFiles, selectedFileKeys]
+  );
+
   const toggleFileKey = (key: string) => {
     setSelectedFileKeys(prev => {
       if (prev.includes(key)) {
@@ -978,6 +997,60 @@ export const AdvancedAnalytics: React.FC<AdvancedAnalyticsProps> = ({ caseId, ca
 
     return filtered;
   }, [fileFilteredData, searchTerm, callTypeFilter, dateFromFilter, dateToFilter, durationMinFilter, durationMaxFilter]);
+
+  useEffect(() => {
+    if (!caseId) {
+      clearWorkspaceContext();
+      return;
+    }
+
+    setWorkspaceContext({
+      caseId,
+      caseTag: caseName || null,
+      module: 'cdr',
+      view: selectedTab === 'analysis' ? 'advanced' : selectedTab,
+      selectedFileIds,
+      selectedFileKeys,
+      selectedFileNames,
+      filters: selectedTab === 'records'
+        ? {
+            search: searchTerm || null,
+            callType: callTypeFilter || null,
+            dateFrom: dateFromFilter || null,
+            dateTo: dateToFilter || null,
+            durationMin: durationMinFilter || null,
+            durationMax: durationMaxFilter || null
+          }
+        : null,
+      searchState: selectedTab === 'records'
+        ? {
+            query: searchTerm || null,
+            resultCount: filteredRecords.length
+          }
+        : null,
+      selectionTimestamp: new Date().toISOString()
+    });
+  }, [
+    caseId,
+    caseName,
+    selectedTab,
+    selectedFileIds,
+    selectedFileKeys,
+    selectedFileNames,
+    searchTerm,
+    callTypeFilter,
+    dateFromFilter,
+    dateToFilter,
+    durationMinFilter,
+    durationMaxFilter,
+    filteredRecords.length,
+    setWorkspaceContext,
+    clearWorkspaceContext
+  ]);
+
+  useEffect(() => () => {
+    clearWorkspaceContext();
+  }, [clearWorkspaceContext]);
 
   // Pagination Logic
   useEffect(() => {
@@ -1602,10 +1675,10 @@ export const AdvancedAnalytics: React.FC<AdvancedAnalyticsProps> = ({ caseId, ca
             {/* Stats Cards */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
               {[
-                { label: 'Total Records', value: stats.totalRecords.toLocaleString(), icon: 'description', color: 'blue' },
-                { label: 'Unique A-Parties', value: stats.uniqueAParties.toLocaleString(), icon: 'person', color: 'green' },
-                { label: 'Unique B-Parties', value: stats.uniqueBParties.toLocaleString(), icon: 'group', color: 'purple' },
-                { label: 'Avg Duration', value: `${stats.avgDuration}s`, icon: 'timer', color: 'orange' }
+                { label: getMetricUiLabel('total_records', 'Total Records'), value: stats.totalRecords.toLocaleString(), icon: 'description', color: 'blue' },
+                { label: getMetricUiLabel('unique_a_parties', 'Unique A-Parties'), value: stats.uniqueAParties.toLocaleString(), icon: 'person', color: 'green' },
+                { label: getMetricUiLabel('unique_b_parties', 'Unique B-Parties'), value: stats.uniqueBParties.toLocaleString(), icon: 'group', color: 'purple' },
+                { label: getMetricUiLabel('avg_duration_sec', 'Avg Duration'), value: `${stats.avgDuration}s`, icon: 'timer', color: 'orange' }
               ].map((stat, i) => (
                 <div key={i} className="rounded-2xl border border-slate-200/80 bg-white p-6 shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg dark:border-slate-800 dark:bg-[#111c38]">
                   <div className="flex items-center gap-3 mb-2">
@@ -1929,7 +2002,7 @@ export const AdvancedAnalytics: React.FC<AdvancedAnalyticsProps> = ({ caseId, ca
               {/* ISD Calls */}
               <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-6 flex flex-col h-96">
                 <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-4 flex items-center gap-2">
-                  <span className="material-symbols-outlined text-red-500">public</span> International Calls
+                  <span className="material-symbols-outlined text-red-500">public</span> {getMetricUiLabel('international_calls', 'International Calls')}
                 </h3>
                 <div className="flex-1 overflow-y-auto custom-scrollbar">
                    {isdCallData.length > 0 ? isdCallData.map((item, i) => (
@@ -1949,7 +2022,7 @@ export const AdvancedAnalytics: React.FC<AdvancedAnalyticsProps> = ({ caseId, ca
               {/* Day Wise First/Last Call */}
               <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-6 flex flex-col h-96">
                 <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-4 flex items-center gap-2">
-                  <span className="material-symbols-outlined text-orange-500">schedule</span> Daily First/Last Call
+                  <span className="material-symbols-outlined text-orange-500">schedule</span> {getMetricUiLabel('daily_first_last_call', 'Daily First/Last Call')}
                 </h3>
                 <div className="flex-1 overflow-y-auto custom-scrollbar">
                    {dayFirstLastData.length > 0 ? dayFirstLastData.map((item, i) => (

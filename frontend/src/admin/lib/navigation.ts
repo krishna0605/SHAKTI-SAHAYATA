@@ -1,5 +1,6 @@
 import {
   AlertTriangle,
+  Archive,
   BellRing,
   Database,
   FileCog,
@@ -25,6 +26,8 @@ export const primaryAdminNavigation: AdminNavItem[] = [
   { label: 'Normalization & Processing', to: adminPaths.normalization, icon: ShieldEllipsis },
   { label: 'Table Editor', to: adminPaths.tableEditor, icon: FileSpreadsheet },
   { label: 'Database', to: adminPaths.database, icon: Database },
+  { label: 'Officer Roster', to: adminPaths.officerRoster, icon: FileSpreadsheet },
+  { label: 'Migration Cleanup', to: adminPaths.migrationCleanup, icon: Archive },
   { label: 'Users & Roles', to: adminPaths.users, icon: Users },
   { label: 'Audit Trail', to: adminPaths.audit, icon: BellRing },
   { label: 'Alerts & Incidents', to: adminPaths.alerts, icon: AlertTriangle },
@@ -91,6 +94,22 @@ export const resolveAdminRouteMeta = (pathname: string): AdminRouteMeta => {
       eyebrow: 'Database Workspace',
       title: 'Database',
       description: 'Understand schema structure, storage posture, observability, and logs through a visual backend workspace.',
+    }
+  }
+
+  if (pathname.startsWith(adminPaths.officerRoster)) {
+    return {
+      eyebrow: 'Identity Allowlist',
+      title: 'Officer Roster',
+      description: 'Import Gujarat Police buckle ID rosters, validate roster quality, and review sync history before officers sign in.',
+    }
+  }
+
+  if (pathname.startsWith(adminPaths.migrationCleanup)) {
+    return {
+      eyebrow: 'Migration Hygiene',
+      title: 'Migration Cleanup',
+      description: 'Inventory legacy uploads, bootstrap identities, and stale runtime artifacts before the Supabase cutover.',
     }
   }
 

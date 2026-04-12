@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import jwt from 'jsonwebtoken';
+import { isSupabaseAuthEnabled } from './supabase.js';
 
 const INSECURE_JWT_SECRETS = new Set([
   '',
@@ -31,7 +32,13 @@ const parseOrigins = (value, fallback) =>
     .filter(Boolean);
 
 const adminJwtSecret = String(process.env.JWT_ADMIN_SECRET || process.env.JWT_SECRET || '').trim();
-if (!adminJwtSecret || adminJwtSecret.length < 32 || INSECURE_JWT_SECRETS.has(adminJwtSecret)) {
+const legacyAdminJwtEnabled = Boolean(
+  adminJwtSecret
+  && adminJwtSecret.length >= 32
+  && !INSECURE_JWT_SECRETS.has(adminJwtSecret)
+);
+
+if (!legacyAdminJwtEnabled && !isSupabaseAuthEnabled) {
   throw new Error(
     '[ADMIN_AUTH] JWT_ADMIN_SECRET (or fallback JWT_SECRET) is required, must be at least 32 characters, and cannot use the documented placeholder value.'
   );
@@ -52,6 +59,8 @@ export const ADMIN_ALLOWED_ORIGINS = parseOrigins(
 
 export const ADMIN_AUTH_CONFIG = {
   jwtSecret: adminJwtSecret,
+  legacyJwtEnabled: legacyAdminJwtEnabled,
+  provider: isSupabaseAuthEnabled ? 'supabase' : 'legacy-jwt',
   accessTokenTtl: ADMIN_ACCESS_TOKEN_TTL,
   refreshTokenTtlDays: ADMIN_REFRESH_TOKEN_TTL_DAYS,
   refreshCookieName: ADMIN_REFRESH_COOKIE_NAME,
@@ -61,20 +70,24 @@ export const ADMIN_AUTH_CONFIG = {
 };
 
 export const signAdminAccessToken = (admin, options = {}) =>
-  jwt.sign(
-    {
-      adminId: admin.id,
-      email: admin.email,
-      fullName: admin.full_name,
-      role: admin.role,
-      permissions: Array.isArray(admin.permissions) ? admin.permissions : [],
-      accountType: 'it_admin',
-      sessionId: options.sessionId || null,
-      recentAuthAt: options.recentAuthAt || Math.floor(Date.now() / 1000),
-    },
-    ADMIN_AUTH_CONFIG.jwtSecret,
-    { expiresIn: ADMIN_AUTH_CONFIG.accessTokenTtl, audience: 'admin-console', subject: String(admin.id) }
-  );
+  legacyAdminJwtEnabled
+    ? jwt.sign(
+      {
+        adminId: admin.id,
+        email: admin.email,
+        fullName: admin.full_name,
+        role: admin.role,
+        permissions: Array.isArray(admin.permissions) ? admin.permissions : [],
+        accountType: 'it_admin',
+        sessionId: options.sessionId || null,
+        recentAuthAt: options.recentAuthAt || Math.floor(Date.now() / 1000),
+      },
+      ADMIN_AUTH_CONFIG.jwtSecret,
+      { expiresIn: ADMIN_AUTH_CONFIG.accessTokenTtl, audience: 'admin-console', subject: String(admin.id) }
+    )
+    : (() => {
+      throw new Error('Legacy admin JWT signing is disabled while Supabase Auth is active.');
+    })();
 
 export const decodeAdminAccessTokenExpiry = (token) => {
   const decoded = jwt.decode(token);
@@ -83,7 +96,11 @@ export const decodeAdminAccessTokenExpiry = (token) => {
 };
 
 export const verifyAdminAccessToken = (token) =>
-  jwt.verify(token, ADMIN_AUTH_CONFIG.jwtSecret, { audience: 'admin-console' });
+  legacyAdminJwtEnabled
+    ? jwt.verify(token, ADMIN_AUTH_CONFIG.jwtSecret, { audience: 'admin-console' })
+    : (() => {
+      throw new Error('Legacy admin JWT verification is disabled while Supabase Auth is active.');
+    })();
 
 export const buildAdminRefreshCookieOptions = () => ({
   httpOnly: true,

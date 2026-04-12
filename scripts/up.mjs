@@ -10,6 +10,7 @@ const prometheusUrl = 'http://localhost:9090';
 const grafanaUrl = 'http://localhost:3002';
 const hostOllamaUrl = (process.env.OLLAMA_BASE_URL || 'http://localhost:11434').replace(/\/$/, '');
 const ollamaModel = process.env.OLLAMA_MODEL || 'phi3.5';
+const forceBuild = process.argv.includes('--build') || process.env.SHAKTI_FORCE_BUILD === '1' || process.env.SHAKTI_FORCE_BUILD === 'true';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '..');
 const runtimeDir = path.join(repoRoot, 'ops', 'runtime');
@@ -45,20 +46,72 @@ const runCommand = (command, args, options = {}) =>
     });
   });
 
+const runCommandCapture = (command, args, options = {}) =>
+  new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      ...options
+    });
+
+    let stdout = '';
+    let stderr = '';
+
+    child.stdout.on('data', (chunk) => {
+      stdout += chunk.toString();
+    });
+
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk.toString();
+    });
+
+    child.on('error', reject);
+    child.on('exit', (code) => {
+      if (code === 0) {
+        resolve({ stdout, stderr });
+        return;
+      }
+      reject(new Error(`${command} ${args.join(' ')} exited with code ${code}: ${stderr || stdout}`));
+    });
+  });
+
+const getContainerState = async (containerName) => {
+  try {
+    const { stdout } = await runCommandCapture('docker', ['inspect', '--format', '{{.State.Status}}', containerName]);
+    return stdout.trim() || null;
+  } catch {
+    return null;
+  }
+};
+
 const waitForBackend = async (timeoutMs = 180000) => {
   const startedAt = Date.now();
 
   while (Date.now() - startedAt < timeoutMs) {
     try {
       const response = await fetch(backendHealthUrl);
-      if (response.ok) return true;
+      if (response.ok) {
+        const payload = await response.json().catch(() => null);
+        return {
+          ready: true,
+          payload,
+        };
+      }
     } catch {
       // keep waiting
     }
+
+    const backendState = await getContainerState('shakti-backend');
+    if (backendState && backendState !== 'running' && backendState !== 'restarting' && backendState !== 'created') {
+      throw new Error(`Backend container entered "${backendState}" state before becoming healthy.`);
+    }
+
     await sleep(3000);
   }
 
-  return false;
+  return {
+    ready: false,
+    payload: null,
+  };
 };
 
 const waitForHttp = async (url, { timeoutMs = 120000, init = {}, validate = (response) => response.ok } = {}) => {
@@ -155,12 +208,12 @@ const main = async () => {
   console.log('\n[up] Checking host Ollama runtime...\n');
   await ensureHostOllama();
 
-  console.log('\n[up] Starting SHAKTI development stack with Docker (host Ollama mode)...\n');
+  console.log(`\n[up] Starting SHAKTI development stack with Docker (host Ollama mode${forceBuild ? ', forced rebuild' : ''})...\n`);
   const effectiveComposeArgs = hostMetricsProfile ? ['compose', '--profile', 'observability', '--profile', hostMetricsProfile, '-f', 'docker-compose.yml', '-f', 'docker-compose.dev.yml'] : composeArgs;
-  await runCommand('docker', [...effectiveComposeArgs, 'up', '--build', '-d']);
+  await runCommand('docker', [...effectiveComposeArgs, 'up', ...(forceBuild ? ['--build'] : []), '-d']);
 
   console.log('\n[up] Waiting for backend, GraphQL, Prometheus, and Grafana readiness...\n');
-  const backendReady = await waitForBackend();
+  const backendHealth = await waitForBackend();
   const [graphqlReady, prometheusReady, grafanaReady] = await Promise.all([
     waitForHttp(graphqlUrl, {
       init: {
@@ -180,16 +233,25 @@ const main = async () => {
     }),
   ]);
 
-  if (!backendReady) {
+  if (!backendHealth.ready) {
     console.warn('[up] Backend did not become healthy within the expected time window.');
   } else {
-    console.log('[up] Backend is reachable. Controlled bootstrap identity checks passed through startup readiness.');
+    const backendStatus = backendHealth.payload?.status || 'unknown';
+    const degraded = backendHealth.payload?.summary?.degraded || [];
+    const failed = backendHealth.payload?.summary?.failed || [];
+    console.log(`[up] Backend is reachable (health=${backendStatus}).`);
+    if (degraded.length > 0) {
+      console.log(`[up] Backend degraded checks: ${degraded.join(', ')}`);
+    }
+    if (failed.length > 0) {
+      console.log(`[up] Backend failed checks: ${failed.join(', ')}`);
+    }
   }
   console.log(`[up] GraphQL endpoint: ${graphqlReady ? 'ready' : 'not ready yet'}`);
   console.log(`[up] Prometheus: ${prometheusReady ? 'ready' : 'not ready yet'}`);
   console.log(`[up] Grafana: ${grafanaReady ? 'ready' : 'not ready yet'}`);
   if (!hostMetricsProfile) {
-    console.log('[up] Host node exporter: skipped on this platform; backend and Postgres metrics are still available.');
+    console.log('[up] Host node exporter: skipped on this platform; backend metrics remain available.');
   }
 
   const [backupStatus, restoreStatus] = await Promise.all([

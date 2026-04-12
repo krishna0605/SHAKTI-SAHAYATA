@@ -7,10 +7,11 @@ services:
   # Dev: Mount source for hot reload
   backend:
     build:
-      context: ./backend
-      dockerfile: Dockerfile.dev
+      context: .
+      dockerfile: backend/Dockerfile.dev
     volumes:
       - ./backend:/app
+      - ./shared:/shared
       - /app/node_modules
       - ./backend/uploads:/app/uploads
       - ./ops:/app/ops
@@ -18,12 +19,23 @@ services:
       NODE_ENV: development
       OLLAMA_BASE_URL: http://host.docker.internal:11434
       OLLAMA_URL: http://host.docker.internal:11434
+      DB_SSL: ${DB_SSL:-false}
       CHATBOT_DIAGNOSTICS_ENABLED: ${CHATBOT_DIAGNOSTICS_ENABLED:-true}
       AUTH_RATE_LIMIT_MAX_REQUESTS: ${AUTH_RATE_LIMIT_MAX_REQUESTS:-250}
       ADMIN_AUTH_RATE_LIMIT_MAX_REQUESTS: ${ADMIN_AUTH_RATE_LIMIT_MAX_REQUESTS:-250}
       REFRESH_COOKIE_SECURE: ${REFRESH_COOKIE_SECURE:-false}
       BACKUP_STATUS_FILE: /app/runtime/backup-status.json
       RESTORE_STATUS_FILE: /app/runtime/restore-status.json
+      SUPABASE_URL: ${SUPABASE_URL:-}
+      SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY:-}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:-}
+      SUPABASE_DB_URL_POOLER: ${SUPABASE_DB_URL_POOLER:-}
+      SUPABASE_DB_URL_DIRECT: ${SUPABASE_DB_URL_DIRECT:-}
+      SUPABASE_JWKS_URL: ${SUPABASE_JWKS_URL:-}
+      SUPABASE_JWT_AUDIENCE: ${SUPABASE_JWT_AUDIENCE:-authenticated}
+      SUPABASE_STORAGE_BUCKET_EVIDENCE: ${SUPABASE_STORAGE_BUCKET_EVIDENCE:-case-evidence}
+      SUPABASE_STORAGE_BUCKET_EXPORTS: ${SUPABASE_STORAGE_BUCKET_EXPORTS:-admin-exports}
+      SUPABASE_STORAGE_BUCKET_QUARANTINE: ${SUPABASE_STORAGE_BUCKET_QUARANTINE:-legacy-quarantine}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     command: sh /app/scripts/dev-entrypoint.sh
@@ -31,34 +43,48 @@ services:
   # Dev: Vite HMR instead of nginx
   frontend:
     build:
-      context: ./frontend
-      dockerfile: Dockerfile.dev
+      context: .
+      dockerfile: frontend/Dockerfile.dev
+      args:
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:3001}
+        VITE_SUPABASE_URL: ${VITE_SUPABASE_URL:-}
+        VITE_SUPABASE_ANON_KEY: ${VITE_SUPABASE_ANON_KEY:-}
     ports: !override
       - "5173:5173"
     volumes:
       - ./frontend:/app
+      - ./shared:/shared
       - /app/node_modules
     environment:
       VITE_API_URL: http://localhost:3001
+      VITE_SUPABASE_URL: ${VITE_SUPABASE_URL:-}
+      VITE_SUPABASE_ANON_KEY: ${VITE_SUPABASE_ANON_KEY:-}
       VITE_AI_URL: http://localhost:8000
       VITE_ADMIN_APP_URL: http://localhost:4174
-    command: npm run dev -- --host 0.0.0.0
+    command: sh /app/scripts/dev-entrypoint.sh npm run dev -- --host 0.0.0.0
 
   admin-frontend:
     build:
-      context: ./frontend
-      dockerfile: Dockerfile.dev
+      context: .
+      dockerfile: frontend/Dockerfile.dev
+      args:
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:3001}
+        VITE_SUPABASE_URL: ${VITE_SUPABASE_URL:-}
+        VITE_SUPABASE_ANON_KEY: ${VITE_SUPABASE_ANON_KEY:-}
     ports: !override
       - "4174:4174"
     volumes:
       - ./frontend:/app
+      - ./shared:/shared
       - /app/node_modules
     environment:
       VITE_API_URL: http://localhost:3001
+      VITE_SUPABASE_URL: ${VITE_SUPABASE_URL:-}
+      VITE_SUPABASE_ANON_KEY: ${VITE_SUPABASE_ANON_KEY:-}
       VITE_AI_URL: http://localhost:8000
       VITE_MAIN_APP_URL: http://localhost:5173
       VITE_ADMIN_APP_URL: http://localhost:4174
-    command: npm run dev:admin -- --host 0.0.0.0
+    command: sh /app/scripts/dev-entrypoint.sh npm run dev:admin -- --host 0.0.0.0
 
   # Dev: Mount source for hot reload
   ai-services:

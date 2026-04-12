@@ -39,6 +39,8 @@ export const adminPaths = {
   normalization: '/normalization-processing',
   tableEditor: '/table-editor',
   database: '/database',
+  officerRoster: '/officer-roster',
+  migrationCleanup: '/migration-cleanup',
   users: '/users-roles',
   audit: '/audit-trail',
   alerts: '/alerts-incidents',

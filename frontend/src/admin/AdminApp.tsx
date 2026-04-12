@@ -16,6 +16,8 @@ const AdminIngestionPipelinePage = lazy(() => import('./pages/AdminIngestionPipe
 const AdminNormalizationPage = lazy(() => import('./pages/AdminNormalizationPage'))
 const AdminTableEditorPage = lazy(() => import('./pages/AdminTableEditorPage'))
 const AdminDatabaseWorkspacePage = lazy(() => import('./pages/AdminDatabaseWorkspacePage'))
+const AdminOfficerRosterPage = lazy(() => import('./pages/AdminOfficerRosterPage'))
+const AdminMigrationCleanupPage = lazy(() => import('./pages/AdminMigrationCleanupPage'))
 const AdminUsersRolesPage = lazy(() => import('./pages/AdminUsersRolesPage'))
 const AdminAuditTrailPage = lazy(() => import('./pages/AdminAuditTrailPage'))
 const AdminAlertsIncidentsPage = lazy(() => import('./pages/AdminAlertsIncidentsPage'))
@@ -49,6 +51,8 @@ export default function AdminApp() {
             <Route path={adminPaths.normalization} element={<AdminNormalizationPage />} />
             <Route path={adminPaths.tableEditor} element={<AdminTableEditorPage />} />
             <Route path={adminPaths.database} element={<AdminDatabaseWorkspacePage />} />
+            <Route path={adminPaths.officerRoster} element={<AdminOfficerRosterPage />} />
+            <Route path={adminPaths.migrationCleanup} element={<AdminMigrationCleanupPage />} />
             <Route path={adminPaths.users} element={<AdminUsersRolesPage />} />
             <Route path={adminPaths.audit} element={<AdminAuditTrailPage />} />
             <Route path={adminPaths.alerts} element={<AdminAlertsIncidentsPage />} />

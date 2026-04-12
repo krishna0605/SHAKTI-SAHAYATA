@@ -9,6 +9,8 @@ import { ipdrAPI } from '../lib/apis';
 import { encodeSpreadsheetRows } from '../lib/security';
 import { RecordTable } from './RecordTable';
 import { AnalysisTabBar } from './AnalysisTabBar';
+import { useChatbotWorkspaceStore } from '../../stores/chatbotWorkspaceStore';
+import { getMetricUiLabel } from '../../lib/caseQaCatalog';
 
 interface ModuleConfig {
   id: string;
@@ -19,7 +21,7 @@ interface ModuleConfig {
 }
 
 const MODULES: ModuleConfig[] = [
-  { id: 'top_msisdn', title: 'Top MSISDN', icon: 'phone_android', tag: 'ANALYTICS', color: 'emerald' },
+  { id: 'top_msisdn', title: getMetricUiLabel('top_msisdn', 'Top MSISDN'), icon: 'phone_android', tag: 'ANALYTICS', color: 'emerald' },
   { id: 'top_imei', title: 'Top IMEI', icon: 'smartphone', tag: 'DEVICE', color: 'orange' },
   { id: 'top_imsi', title: 'Top IMSI', icon: 'sim_card', tag: 'SIM', color: 'indigo' },
   { id: 'ip_analysis', title: 'IP Analysis', icon: 'lan', tag: 'NETWORK', color: 'cyan' },
@@ -576,6 +578,8 @@ interface IPDRAnalyticsProps {
 }
 
 export default function IPDRAnalytics({ caseId, caseName, operator, parsedData, fileCount, onBack }: IPDRAnalyticsProps) {
+  const setWorkspaceContext = useChatbotWorkspaceStore((state) => state.setWorkspaceContext);
+  const clearWorkspaceContext = useChatbotWorkspaceStore((state) => state.clearWorkspaceContext);
   const [data, setData] = useState<NormalizedIPDR[]>(parsedData || []);
   const [selectedTab, setSelectedTab] = useState<'overview' | 'records' | 'analysis' | 'map' | 'charts'>('overview');
   const [filteredData, setFilteredData] = useState<NormalizedIPDR[]>([]);
@@ -1032,6 +1036,58 @@ export default function IPDRAnalytics({ caseId, caseName, operator, parsedData, 
       .slice(0, 3000);
   }, [data]);
 
+  useEffect(() => {
+    if (!caseId) {
+      clearWorkspaceContext();
+      return;
+    }
+
+    setWorkspaceContext({
+      caseId,
+      caseTag: caseName || null,
+      module: 'ipdr',
+      view: selectedTab === 'analysis' ? 'advanced' : selectedTab,
+      filters: selectedTab === 'records'
+        ? {
+            search: searchTerm || null,
+            msisdn: msisdnFilter || null,
+            imei: imeiFilter || null,
+            imsi: imsiFilter || null,
+            ip: ipFilter || null
+          }
+        : null,
+      searchState: selectedTab === 'records'
+        ? {
+            query: searchTerm || null,
+            resultCount: filteredData.length
+          }
+        : null,
+      mapState: selectedTab === 'map'
+        ? {
+            pointCount: mapPoints.length
+          }
+        : null,
+      selectionTimestamp: new Date().toISOString()
+    });
+  }, [
+    caseId,
+    caseName,
+    selectedTab,
+    searchTerm,
+    msisdnFilter,
+    imeiFilter,
+    imsiFilter,
+    ipFilter,
+    filteredData.length,
+    mapPoints.length,
+    setWorkspaceContext,
+    clearWorkspaceContext
+  ]);
+
+  useEffect(() => () => {
+    clearWorkspaceContext();
+  }, [clearWorkspaceContext]);
+
   // Pagination
   const totalPages = Math.max(1, Math.ceil(filteredData.length / itemsPerPage));
   const paginatedData = filteredData.slice(
@@ -1114,7 +1170,7 @@ export default function IPDRAnalytics({ caseId, caseName, operator, parsedData, 
           <div className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
               <div className="analysis-panel p-4">
-                <div className="text-sm text-slate-500">Total Records</div>
+                <div className="text-sm text-slate-500">{getMetricUiLabel('total_records', 'Total Records')}</div>
                 <div className="text-2xl font-bold">{stats.totalRecords.toLocaleString()}</div>
               </div>
               <div className="analysis-panel p-4">
@@ -1730,7 +1786,7 @@ export default function IPDRAnalytics({ caseId, caseName, operator, parsedData, 
                   </div>
                 </div>
                 <div className="bg-white dark:bg-slate-800 p-6 rounded-lg border border-slate-200 dark:border-slate-700 h-80">
-                  <div className="text-lg font-bold mb-4">Top MSISDN (Sessions)</div>
+                  <div className="text-lg font-bold mb-4">{`${getMetricUiLabel('top_msisdn', 'Top MSISDN')} (Sessions)`}</div>
                   <div className="h-full">
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart data={topMsisdnChartData}>

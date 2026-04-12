@@ -10,10 +10,12 @@ import {
   signAdminAccessToken
 } from '../../config/adminAuth.js';
 import { ADMIN_CONSOLE_CONFIG } from '../../config/adminConsole.js';
+import { getSupabaseAdminClient, getSupabasePublicClient, isSupabaseAuthEnabled, verifySupabaseAccessToken } from '../../config/supabase.js';
 import { authenticateAdminToken } from '../../middleware/admin/authenticateAdminToken.js';
 import { logAdminAction } from '../../services/admin/adminAudit.service.js';
 import { getAdminTotpPolicyState, verifyAdminTotpCode } from '../../services/admin/adminTotp.service.js';
 import { emitAdminConsoleEvent } from '../../services/admin/adminEventStream.service.js';
+import { ensureAdminSupabaseProfile, getAdminProfileByAuthUserId } from '../../services/auth/authIdentity.service.js';
 
 const router = Router();
 
@@ -57,6 +59,11 @@ const buildAccessTokenPayload = (admin) => {
     accessToken,
     expiresAt: decodeAdminAccessTokenExpiry(accessToken)
   };
+};
+
+const getBearerToken = (req) => {
+  const header = req.headers.authorization;
+  return header && header.split(' ')[1];
 };
 
 const createSessionRecord = async ({ adminAccountId, ipAddress, userAgent }) => {
@@ -170,7 +177,7 @@ const rotateRefreshToken = async ({ existingToken, ipAddress, userAgent }) => {
 
 const getRefreshTokenFromCookie = (req) => req.cookies?.[ADMIN_AUTH_CONFIG.refreshCookieName] || null;
 
-const buildAdminResponse = async ({ admin, session, res, refreshToken }) => {
+const buildAdminResponse = async ({ admin, session, res, refreshToken, accessTokenOverride = null }) => {
   const tokenAdmin = {
     ...admin,
     session_id: session?.id || admin.session_id || null,
@@ -178,7 +185,9 @@ const buildAdminResponse = async ({ admin, session, res, refreshToken }) => {
       ? Math.floor(new Date(session.last_reauthenticated_at).getTime() / 1000)
       : admin.recent_auth_at || Math.floor(Date.now() / 1000),
   };
-  const normalizedTokenPayload = buildAccessTokenPayload(tokenAdmin);
+  const normalizedTokenPayload = accessTokenOverride
+    ? { accessToken: accessTokenOverride, expiresAt: null }
+    : buildAccessTokenPayload(tokenAdmin);
 
   if (refreshToken) {
     setAdminRefreshCookie(res, refreshToken);
@@ -202,6 +211,34 @@ const buildAdminResponse = async ({ admin, session, res, refreshToken }) => {
           lastReauthenticatedAt: session.last_reauthenticated_at || null,
         }
       : null
+  };
+};
+
+const buildSupabaseAdminBootstrap = async ({ req, res, token }) => {
+  const claims = await verifySupabaseAccessToken(token);
+  let admin = await getAdminProfileByAuthUserId(claims.sub);
+
+  if (!admin && claims.email) {
+    admin = await ensureAdminSupabaseProfile({
+      authUserId: claims.sub,
+      email: String(claims.email).trim().toLowerCase(),
+    });
+  }
+
+  if (!admin || !admin.is_active) {
+    return { authenticated: false };
+  }
+
+  const payload = await buildAdminResponse({
+    admin,
+    session: null,
+    res,
+    accessTokenOverride: token,
+  });
+
+  return {
+    authenticated: true,
+    ...payload,
   };
 };
 
@@ -446,6 +483,11 @@ router.post('/refresh', async (req, res) => {
 
 router.get('/bootstrap', async (req, res) => {
   try {
+    const bearerToken = getBearerToken(req);
+    if (bearerToken && isSupabaseAuthEnabled) {
+      return res.json(await buildSupabaseAdminBootstrap({ req, res, token: bearerToken }));
+    }
+
     const rawToken = getRefreshTokenFromCookie(req);
     if (!rawToken) {
       return res.json({ authenticated: false });
@@ -483,6 +525,17 @@ router.get('/bootstrap', async (req, res) => {
 
 router.post('/logout', authenticateAdminToken, async (req, res) => {
   try {
+    if (req.authType === 'supabase') {
+      await logAdminAction({
+        adminAccountId: req.admin.adminId,
+        action: 'SUPABASE_ADMIN_LOGOUT',
+        resourceType: 'admin_session',
+        ipAddress: req.ip
+      });
+      clearAdminRefreshCookie(res);
+      return res.json({ message: 'Admin logged out successfully' });
+    }
+
     const rawToken = getRefreshTokenFromCookie(req);
     const existingToken = rawToken ? await findRefreshTokenRecord(rawToken) : null;
 
@@ -614,7 +667,12 @@ router.post('/re-auth', authenticateAdminToken, async (req, res) => {
     );
 
     const session = sessionResult.rows[0] || await getLatestActiveSession(admin.id);
-    const payload = await buildAdminResponse({ admin, session, res });
+    const payload = await buildAdminResponse({
+      admin,
+      session,
+      res,
+      accessTokenOverride: req.authType === 'supabase' ? req.authToken : null,
+    });
 
     await logAdminAction({
       adminAccountId: admin.id,
@@ -661,7 +719,18 @@ router.post('/change-password', authenticateAdminToken, async (req, res) => {
       return res.status(404).json({ error: 'Admin account not found' });
     }
 
-    const validPassword = await bcrypt.compare(currentPassword, admin.password_hash);
+    let validPassword = await bcrypt.compare(currentPassword, admin.password_hash);
+    if (req.authType === 'supabase') {
+      const supabasePublic = getSupabasePublicClient();
+      const loginAttempt = await supabasePublic.auth.signInWithPassword({
+        email: admin.email,
+        password: currentPassword,
+      });
+      validPassword = !loginAttempt.error;
+      if (loginAttempt.data?.session?.access_token) {
+        await supabasePublic.auth.signOut();
+      }
+    }
     if (!validPassword) {
       await logAdminAction({
         adminAccountId: admin.id,
@@ -680,6 +749,15 @@ router.post('/change-password', authenticateAdminToken, async (req, res) => {
     }
 
     const passwordHash = await bcrypt.hash(newPassword, 12);
+    if (req.authType === 'supabase' && admin.auth_user_id) {
+      const supabaseAdmin = getSupabaseAdminClient();
+      const { error: updateError } = await supabaseAdmin.auth.admin.updateUserById(admin.auth_user_id, {
+        password: newPassword,
+      });
+      if (updateError) {
+        throw updateError;
+      }
+    }
     await pool.query(
       `
         UPDATE admin_accounts

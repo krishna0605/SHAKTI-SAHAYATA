@@ -12,6 +12,9 @@ ensure_dependency() {
   npm install
 }
 
+ensure_dependency "@supabase/supabase-js"
+ensure_dependency "@supabase/postgrest-js"
+ensure_dependency "jose"
 ensure_dependency "prom-client"
 
 exec npx nodemon index.js

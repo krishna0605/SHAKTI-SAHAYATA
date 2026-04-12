@@ -4,6 +4,7 @@ import { authenticateToken } from '../middleware/auth.js';
 import { upload, handleUploadError } from '../middleware/upload.js';
 import XLSX from 'xlsx';
 import { emitAdminConsoleEvent } from '../services/admin/adminEventStream.service.js';
+import { invalidateCaseMemorySnapshots } from '../services/chatbot/caseMemorySnapshot.service.js';
 
 const router = Router();
 
@@ -199,6 +200,7 @@ router.post('/records', authenticateToken, async (req, res) => {
     }
 
     await updateUploadedFileProgress(fileId, inserted);
+    await invalidateCaseMemorySnapshots({ caseId: parsedCaseId, module: 'sdr' });
     emitIngestionCompletionEvents({ caseId: parsedCaseId, fileId: toInt(fileId), inserted, module: 'sdr' });
 
     res.json({ inserted });
@@ -305,6 +307,9 @@ router.post('/table/replace', authenticateToken, async (req, res) => {
       inserted += batch.length;
     }
 
+    if (caseId) {
+      await invalidateCaseMemorySnapshots({ caseId, module: 'sdr' });
+    }
     res.json({ inserted, skipped: 0 });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -325,6 +330,9 @@ router.delete('/table', authenticateToken, async (req, res) => {
       scope.params
     );
 
+    if (caseId) {
+      await invalidateCaseMemorySnapshots({ caseId, module: 'sdr' });
+    }
     res.json({ dropped: result.rowCount || 0 });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -441,6 +449,9 @@ router.post('/upload', authenticateToken, upload.single('file'), handleUploadErr
       inserted += batch.length;
     }
 
+    if (caseId) {
+      await invalidateCaseMemorySnapshots({ caseId, module: 'sdr' });
+    }
     return res.json({ table: DEFAULT_TABLE_NAME, inserted, skipped: 0 });
   } catch (error) {
     res.status(500).json({ error: error.message });

@@ -3,7 +3,10 @@ import { caseAPI } from '../lib/apis';
 import { isPotentialPromptInjection, sanitizeUserText } from '../lib/security';
 import { useCaseContextStore } from '../../stores/caseContextStore';
 import type { ActiveCaseContext } from '../../stores/caseContextStore';
+import { useChatbotWorkspaceStore } from '../../stores/chatbotWorkspaceStore';
 import { apiClient, getAccessToken } from '../../lib/apiClient';
+import GroundedAnswerCard, { type ChatAnswerPayload, type ClarificationOption, type GroundedAnswerAction } from './GroundedAnswerCard';
+import { renderRichMessage } from './chatRichText';
 import {
   Bar,
   BarChart,
@@ -21,6 +24,7 @@ interface Message {
   text: string;
   sender: 'user' | 'bot';
   timestamp: Date;
+  answerPayload?: ChatAnswerPayload | null;
   chartSpec?: ChartSpec | null;
   chartSpecs?: ChartSpec[] | null;
   caseSuggestions?: CompactCaseSuggestion[] | null;
@@ -102,16 +106,6 @@ const ChatChart: React.FC<{ spec: ChartSpec; dark: boolean }> = ({ spec, dark })
   );
 };
 
-const SQL_KEYWORDS = new Set([
-  'select', 'from', 'where', 'join', 'left', 'right', 'inner', 'outer', 'on', 'group', 'by', 'order',
-  'limit', 'offset', 'count', 'sum', 'avg', 'min', 'max', 'as', 'and', 'or', 'not', 'null', 'is', 'in',
-  'distinct', 'case', 'when', 'then', 'else', 'end', 'with', 'union', 'all', 'having'
-]);
-
-const copyToClipboard = async (value: string) => {
-  await navigator.clipboard.writeText(value);
-};
-
 const getAuthHeaders = (): Record<string, string> => {
   const token = getAccessToken();
   return token ? { Authorization: `Bearer ${token}` } : {};
@@ -186,102 +180,6 @@ const getTagContext = (value: string, caret: number): TagContext => {
   };
 };
 
-const inlineFormat = (text: string): React.ReactNode[] => {
-  const tokens = text.split(/(`[^`]+`|\*\*[^*]+\*\*)/g).filter(Boolean);
-  return tokens.map((token, idx) => {
-    if (token.startsWith('**') && token.endsWith('**')) return <strong key={`b-${idx}`}>{token.slice(2, -2)}</strong>;
-    if (token.startsWith('`') && token.endsWith('`')) return <code key={`c-${idx}`} className="chat-inline-code">{token.slice(1, -1)}</code>;
-    return <React.Fragment key={`t-${idx}`}>{token}</React.Fragment>;
-  });
-};
-
-const isTableSeparator = (line: string) => /^\|\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?$/.test(line.trim());
-
-const CopyIconButton: React.FC<{ onClick: () => void; copied: boolean; title: string }> = ({ onClick, copied, title }) => (
-  <button type="button" className="chat-copy-btn" onClick={onClick} title={title}>
-    <span className="material-symbols-outlined text-[15px]">{copied ? 'check' : 'content_copy'}</span>
-  </button>
-);
-
-const SqlHighlight: React.FC<{ code: string }> = ({ code }) => (
-  <>
-    {code.split('\n').map((row, rowIdx) => {
-      const parts = row.split(/(\s+|--.*$|'[^']*'|"(?:[^"]*)")/g).filter(Boolean);
-      return (
-        <div key={`sql-row-${rowIdx}`}>
-          {parts.map((part, idx) => {
-            const lower = part.toLowerCase();
-            if (/^--/.test(part)) return <span key={`p-${rowIdx}-${idx}`} className="chat-sql-comment">{part}</span>;
-            if (/^'.*'$/.test(part) || /^".*"$/.test(part)) return <span key={`p-${rowIdx}-${idx}`} className="chat-sql-string">{part}</span>;
-            if (SQL_KEYWORDS.has(lower)) return <span key={`p-${rowIdx}-${idx}`} className="chat-sql-keyword">{part}</span>;
-            if (/^\d+(\.\d+)?$/.test(part)) return <span key={`p-${rowIdx}-${idx}`} className="chat-sql-number">{part}</span>;
-            return <span key={`p-${rowIdx}-${idx}`}>{part}</span>;
-          })}
-        </div>
-      );
-    })}
-  </>
-);
-
-const CodeBlock: React.FC<{ language?: string; code: string }> = ({ language, code }) => {
-  const [copied, setCopied] = useState(false);
-  const isSql = (language || '').toLowerCase() === 'sql';
-
-  const onCopy = async () => {
-    await copyToClipboard(code);
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 1000);
-  };
-
-  return (
-    <div className="chat-code-wrap">
-      <div className="chat-code-top">
-        <span className="chat-code-lang">{language || 'text'}</span>
-        <CopyIconButton onClick={onCopy} copied={copied} title="Copy code" />
-      </div>
-      <pre className="chat-code-block">
-        <code>{isSql ? <SqlHighlight code={code} /> : code}</code>
-      </pre>
-    </div>
-  );
-};
-
-const TableBlock: React.FC<{ header: string[]; rows: string[][] }> = ({ header, rows }) => {
-  const [copied, setCopied] = useState(false);
-  const markdown = [
-    `| ${header.join(' | ')} |`,
-    `| ${header.map(() => '---').join(' | ')} |`,
-    ...rows.map((r) => `| ${r.join(' | ')} |`),
-  ].join('\n');
-
-  const onCopy = async () => {
-    await copyToClipboard(markdown);
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 1000);
-  };
-
-  return (
-    <div className="chat-table-wrap">
-      <div className="chat-table-top">
-        <span>Table</span>
-        <CopyIconButton onClick={onCopy} copied={copied} title="Copy table" />
-      </div>
-      <table className="chat-table">
-        <thead>
-          <tr>{header.map((h, idx) => <th key={`h-${idx}`}>{h}</th>)}</tr>
-        </thead>
-        <tbody>
-          {rows.map((row, rIdx) => (
-            <tr key={`r-${rIdx}`}>
-              {row.map((cell, cIdx) => <td key={`c-${rIdx}-${cIdx}`}>{inlineFormat(cell)}</td>)}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-};
-
 const ChatCasePickerCard: React.FC<{
   suggestions: CompactCaseSuggestion[];
   dark: boolean;
@@ -303,9 +201,8 @@ const ChatCasePickerCard: React.FC<{
             key={`case-card-${suggestion.id}-${suggestion.caseNumber || suggestion.caseName || 'case'}`}
             type="button"
             onClick={() => onSelect(suggestion)}
-            className={`grid w-full grid-cols-[72px_minmax(0,1.8fr)_minmax(0,1.3fr)_minmax(0,1.2fr)] text-left transition ${
-              dark ? 'border-t border-white/5 hover:bg-blue-500/10' : 'border-t border-slate-200 hover:bg-blue-50'
-            }`}
+            className={`grid w-full grid-cols-[72px_minmax(0,1.8fr)_minmax(0,1.3fr)_minmax(0,1.2fr)] text-left transition ${dark ? 'border-t border-white/5 hover:bg-blue-500/10' : 'border-t border-slate-200 hover:bg-blue-50'
+              }`}
           >
             <div className="px-3 py-2 text-xs font-medium">{suggestion.id}</div>
             <div className="px-3 py-2 text-xs truncate">{suggestion.caseName || `Case ${suggestion.id}`}</div>
@@ -322,11 +219,10 @@ const ChatCasePickerCard: React.FC<{
               key={`quick-tag-${suggestion.id}`}
               type="button"
               onClick={() => onSelect(suggestion)}
-              className={`rounded-full px-3 py-1 text-xs border transition ${
-                dark
-                  ? 'border-blue-400/20 bg-blue-500/10 text-blue-200 hover:bg-blue-500/20'
-                  : 'border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100'
-              }`}
+              className={`rounded-full px-3 py-1 text-xs border transition ${dark
+                ? 'border-blue-400/20 bg-blue-500/10 text-blue-200 hover:bg-blue-500/20'
+                : 'border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100'
+                }`}
             >
               @{suggestion.caseName || suggestion.caseNumber || suggestion.id}
             </button>
@@ -335,86 +231,6 @@ const ChatCasePickerCard: React.FC<{
       </div>
     </div>
   );
-};
-
-const renderRichMessage = (text: string) => {
-  const lines = text.replace(/\r\n/g, '\n').split('\n');
-  const nodes: React.ReactNode[] = [];
-  let i = 0;
-
-  while (i < lines.length) {
-    const trimmed = lines[i].trim();
-    if (!trimmed) {
-      i += 1;
-      continue;
-    }
-
-    if (trimmed.startsWith('```')) {
-      const language = trimmed.slice(3).trim();
-      const chunk: string[] = [];
-      i += 1;
-      while (i < lines.length && !lines[i].trim().startsWith('```')) {
-        chunk.push(lines[i]);
-        i += 1;
-      }
-      i += 1;
-      nodes.push(<CodeBlock key={`cb-${i}`} language={language} code={chunk.join('\n')} />);
-      continue;
-    }
-
-    if (trimmed.startsWith('|') && i + 1 < lines.length && isTableSeparator(lines[i + 1])) {
-      const header = trimmed.split('|').map((c) => c.trim()).filter(Boolean);
-      i += 2;
-      const rows: string[][] = [];
-      while (i < lines.length && lines[i].trim().startsWith('|')) {
-        rows.push(lines[i].trim().split('|').map((c) => c.trim()).filter(Boolean));
-        i += 1;
-      }
-      nodes.push(<TableBlock key={`tb-${i}`} header={header} rows={rows} />);
-      continue;
-    }
-
-    if (trimmed.startsWith('### ')) {
-      nodes.push(<h3 key={`h3-${i}`} className="chat-h3">{inlineFormat(trimmed.slice(4))}</h3>);
-      i += 1;
-      continue;
-    }
-    if (trimmed.startsWith('## ')) {
-      nodes.push(<h2 key={`h2-${i}`} className="chat-h2">{inlineFormat(trimmed.slice(3))}</h2>);
-      i += 1;
-      continue;
-    }
-    if (trimmed.startsWith('# ')) {
-      nodes.push(<h1 key={`h1-${i}`} className="chat-h1">{inlineFormat(trimmed.slice(2))}</h1>);
-      i += 1;
-      continue;
-    }
-
-    if (/^[-*]\s+/.test(trimmed)) {
-      const items: string[] = [];
-      while (i < lines.length && /^[-*]\s+/.test(lines[i].trim())) {
-        items.push(lines[i].trim().replace(/^[-*]\s+/, ''));
-        i += 1;
-      }
-      nodes.push(<ul key={`ul-${i}`} className="chat-ul">{items.map((item, idx) => <li key={`li-${idx}`}>{inlineFormat(item)}</li>)}</ul>);
-      continue;
-    }
-
-    if (/^\d+\.\s+/.test(trimmed)) {
-      const items: string[] = [];
-      while (i < lines.length && /^\d+\.\s+/.test(lines[i].trim())) {
-        items.push(lines[i].trim().replace(/^\d+\.\s+/, ''));
-        i += 1;
-      }
-      nodes.push(<ol key={`ol-${i}`} className="chat-ol">{items.map((item, idx) => <li key={`oi-${idx}`}>{inlineFormat(item)}</li>)}</ol>);
-      continue;
-    }
-
-    nodes.push(<p key={`p-${i}`} className="chat-p">{inlineFormat(trimmed)}</p>);
-    i += 1;
-  }
-
-  return nodes.length > 0 ? nodes : <p className="chat-p">{text}</p>;
 };
 
 const toActiveCaseSuggestion = (suggestion: CompactCaseSuggestion): CaseSuggestion => ({
@@ -451,6 +267,7 @@ export const ChatBot: React.FC<ChatBotProps> = ({ caseId, caseType }) => {
   const activeCase = useCaseContextStore((state) => state.activeCase);
   const setActiveCase = useCaseContextStore((state) => state.setActiveCase);
   const clearActiveCase = useCaseContextStore((state) => state.clearActiveCase);
+  const workspaceContext = useChatbotWorkspaceStore((state) => state.workspaceContext);
   const [isOpen, setIsOpen] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isDarkTheme, setIsDarkTheme] = useState<boolean>(() => {
@@ -635,6 +452,7 @@ export const ChatBot: React.FC<ChatBotProps> = ({ caseId, caseType }) => {
         text: '',
         sender: 'bot',
         timestamp: new Date(),
+        answerPayload: null,
         chartSpec: charts.chartSpec || null,
         chartSpecs: charts.chartSpecs || null,
         caseSuggestions: meta.caseSuggestions || null,
@@ -685,9 +503,7 @@ export const ChatBot: React.FC<ChatBotProps> = ({ caseId, caseType }) => {
     window.addEventListener('mouseup', onUp);
   };
 
-  const handleCopyMessage = async (msg: Message) => {
-    await copyToClipboard(msg.text);
-  };
+
 
   const resetServerSession = async (existingSessionId: string | null) => {
     if (!existingSessionId) return;
@@ -737,9 +553,7 @@ export const ChatBot: React.FC<ChatBotProps> = ({ caseId, caseType }) => {
     setCaseSuggestionIndex(0);
   };
 
-  const applyCompactCaseSuggestion = (suggestion: CompactCaseSuggestion) => {
-    applyCaseSuggestion(toActiveCaseSuggestion(suggestion));
-  };
+
 
   const handleInputKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
     if (!caseSuggestionOpen) {
@@ -776,9 +590,10 @@ export const ChatBot: React.FC<ChatBotProps> = ({ caseId, caseType }) => {
     }
   };
 
-  const handleSendMessage = async () => {
+  const handleSendMessage = async (overrideText?: string) => {
     if (isBusy) return;
-    const trimmed = sanitizeUserText(inputValue, 4000).trim();
+    const sourceText = typeof overrideText === 'string' ? overrideText : inputValue;
+    const trimmed = sanitizeUserText(sourceText, 4000).trim();
     if (!trimmed) return;
     const explicitTagRef = extractExplicitTagRef(trimmed);
 
@@ -830,11 +645,17 @@ export const ChatBot: React.FC<ChatBotProps> = ({ caseId, caseType }) => {
         }
       }
 
-      const requestCaseId = explicitTagRef ? (requestCase?.id || caseId || null) : null;
-      const requestCaseType = explicitTagRef ? (requestCase?.caseType || caseType || null) : null;
-      const shouldResetSession =
-        !explicitTagRef
-        || (previousActiveCaseId && requestCaseId && previousActiveCaseId !== requestCaseId);
+      const lockedCase = explicitTagRef ? requestCase : activeCase;
+      const requestCaseId = lockedCase?.id || caseId || null;
+      const requestCaseType = lockedCase?.caseType || caseType || null;
+      const shouldResetSession = Boolean(
+        sessionId
+        && explicitTagRef
+        && (
+          !requestCaseId
+          || (previousActiveCaseId && requestCaseId && previousActiveCaseId !== requestCaseId)
+        )
+      );
 
       let nextSessionId = sessionId;
       if (shouldResetSession && sessionId) {
@@ -880,6 +701,7 @@ export const ChatBot: React.FC<ChatBotProps> = ({ caseId, caseType }) => {
           text: '',
           sender: 'bot',
           timestamp: new Date(),
+          answerPayload: null,
           chartSpec: null,
           chartSpecs: null,
           caseSuggestions: null,
@@ -899,8 +721,9 @@ export const ChatBot: React.FC<ChatBotProps> = ({ caseId, caseType }) => {
           query: trimmed,
           sessionId: nextSessionId,
           case_id: requestCaseId,
-          case_name: explicitTagRef ? requestCase?.caseName || null : null,
+          case_name: lockedCase?.caseName || null,
           case_type: requestCaseType,
+          workspaceContext,
           preferredLanguage: preferredLanguage === 'auto' ? null : preferredLanguage,
           stream: true
         })
@@ -949,8 +772,12 @@ export const ChatBot: React.FC<ChatBotProps> = ({ caseId, caseType }) => {
             } else if (event.type === 'complete') {
               completed = true;
               if (typeof event.sessionId === 'string' && event.sessionId) setSessionId(event.sessionId);
+              const parsedPayload = event.answerPayload && typeof event.answerPayload === 'object' && event.answerPayload.version === 'grounded-answer-v1'
+                ? event.answerPayload as ChatAnswerPayload
+                : null;
               updateBotMessage({
                 text: event.response || streamedText || 'I could not generate a response for that query.',
+                answerPayload: parsedPayload,
                 chartSpec: event.chartSpec || null,
                 chartSpecs: event.chartSpecs || null,
                 caseSuggestions: Array.isArray(event.caseSuggestions) ? event.caseSuggestions as CompactCaseSuggestion[] : null,
@@ -967,9 +794,13 @@ export const ChatBot: React.FC<ChatBotProps> = ({ caseId, caseType }) => {
           const event = JSON.parse(buffer.trim());
           if (event.type === 'complete') {
             if (typeof event.sessionId === 'string' && event.sessionId) setSessionId(event.sessionId);
+            const tailPayload = event.answerPayload && typeof event.answerPayload === 'object' && event.answerPayload.version === 'grounded-answer-v1'
+              ? event.answerPayload as ChatAnswerPayload
+              : null;
             setMessages((prev) => prev.map((msg) => (msg.id === botMessageId ? {
               ...msg,
               text: event.response || streamedText || 'I could not generate a response for that query.',
+              answerPayload: tailPayload,
               chartSpec: event.chartSpec || null,
               chartSpecs: event.chartSpecs || null,
               caseSuggestions: Array.isArray(event.caseSuggestions) ? event.caseSuggestions as CompactCaseSuggestion[] : null,
@@ -1007,6 +838,41 @@ export const ChatBot: React.FC<ChatBotProps> = ({ caseId, caseType }) => {
     }
   };
 
+  const handleCopyMessage = (msg: Message) => {
+    const text = msg.answerPayload?.shortAnswer || msg.text || '';
+    if (navigator.clipboard && text) {
+      void navigator.clipboard.writeText(text);
+    }
+  };
+
+  const handleGroundedAnswerAction = (msg: Message, action: GroundedAnswerAction | ClarificationOption) => {
+    if ('kind' in action) {
+      if (action.kind === 'copy') {
+        handleCopyMessage(msg);
+        return;
+      }
+      if (action.kind === 'prompt' && action.prompt) {
+        void handleSendMessage(action.prompt);
+        return;
+      }
+      if ((action.kind === 'navigate' || action.kind === 'open_records') && action.href) {
+        window.location.hash = action.href;
+        return;
+      }
+      // toggle_evidence is handled inside GroundedAnswerCard itself
+      return;
+    }
+    // ClarificationOption: use prompt to auto-send
+    if (action.prompt) {
+      void handleSendMessage(action.prompt);
+    }
+  };
+
+  const applyCompactCaseSuggestion = (suggestion: CompactCaseSuggestion) => {
+    const resolved = toResolvedActiveCase(toActiveCaseSuggestion(suggestion));
+    setActiveCase(resolved);
+  };
+
   const panelClass = useMemo(
     () =>
       isDarkTheme
@@ -1031,20 +897,41 @@ export const ChatBot: React.FC<ChatBotProps> = ({ caseId, caseType }) => {
                 <div className="text-sm font-semibold">SHAKTI SAHAYATA</div>
                 <div className={`text-[11px] ${isDarkTheme ? 'text-slate-400' : 'text-slate-500'}`}>Online • Navigation and troubleshooting</div>
                 {activeCase ? (
-                  <div className={`mt-1 inline-flex items-center gap-2 rounded-full px-2 py-1 text-[10px] ${isDarkTheme ? 'bg-blue-500/15 text-blue-200' : 'bg-blue-100 text-blue-700'}`}>
-                    <span className="material-symbols-outlined text-[13px]">gavel</span>
-                    <span>{activeCase.caseNumber || activeCase.caseName}</span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        void resetServerSession(sessionId);
-                        setSessionId(null);
-                        clearActiveCase();
-                      }}
-                      className={`rounded-full px-1.5 py-0.5 ${isDarkTheme ? 'bg-slate-800 text-slate-200' : 'bg-white text-slate-600'}`}
-                    >
-                      Clear
-                    </button>
+                  <div className="mt-1 flex items-center gap-2 flex-wrap">
+                    <div className={`inline-flex items-center gap-2 rounded-full px-2 py-1 text-[10px] ${isDarkTheme ? 'bg-blue-500/15 text-blue-200' : 'bg-blue-100 text-blue-700'}`}>
+                      <span className="material-symbols-outlined text-[13px]">gavel</span>
+                      <span>{activeCase.caseNumber || activeCase.caseName}</span>
+                      <button
+                        type="button"
+                        onClick={() => setInputValue('@')}
+                        className={`rounded-full px-1.5 py-0.5 ${isDarkTheme ? 'bg-slate-800 text-slate-200' : 'bg-white text-slate-600'}`}
+                      >
+                        Switch
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void resetServerSession(sessionId);
+                          setSessionId(null);
+                          clearActiveCase();
+                        }}
+                        className={`rounded-full px-1.5 py-0.5 ${isDarkTheme ? 'bg-slate-800 text-slate-200' : 'bg-white text-slate-600'}`}
+                      >
+                        Clear
+                      </button>
+                    </div>
+                    {workspaceContext?.module ? (
+                      <div className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-[10px] ${isDarkTheme ? 'bg-emerald-500/15 text-emerald-200' : 'bg-emerald-100 text-emerald-700'}`}>
+                        <span className="material-symbols-outlined text-[12px]">account_tree</span>
+                        <span>{(workspaceContext.module as string).toUpperCase()}</span>
+                      </div>
+                    ) : null}
+                    {workspaceContext?.view ? (
+                      <div className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-[10px] ${isDarkTheme ? 'bg-violet-500/15 text-violet-200' : 'bg-violet-100 text-violet-700'}`}>
+                        <span className="material-symbols-outlined text-[12px]">visibility</span>
+                        <span>{String(workspaceContext.view).replace(/-/g, ' ')}</span>
+                      </div>
+                    ) : null}
                   </div>
                 ) : null}
               </div>
@@ -1084,33 +971,79 @@ export const ChatBot: React.FC<ChatBotProps> = ({ caseId, caseType }) => {
           </div>
 
           <div className={`px-4 py-2 flex gap-2 flex-wrap border-b ${isDarkTheme ? 'border-white/10' : 'border-slate-200'}`}>
-            {[ 
-              { label: 'FIR Summary', query: 'FIR 3 summary' },
-              { label: 'CDR FIR', query: 'open CDR FIR #3' },
-              { label: 'SQL Mode', query: '/sql SELECT COUNT(*) FROM cdr_records' },
-              { label: 'Risk Predict', query: 'predict criminal activities for FIR 3' }
-            ].map((item) => (
-              <button
-                key={item.label}
-                type="button"
-                onClick={() => setInputValue(item.query)}
-                disabled={isBusy}
-                className={`px-3 py-1 text-xs rounded-full border ${isDarkTheme ? 'bg-slate-800/70 text-slate-300 border-white/10 hover:bg-slate-700/70' : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'}`}
-              >
-                {item.label}
-              </button>
-            ))}
+            {(() => {
+              const module = workspaceContext?.module || null;
+              const hasCase = Boolean(activeCase?.id || caseId);
+
+              const MODULE_PROMPTS: Record<string, Array<{ label: string; query: string }>> = {
+                cdr: [
+                  { label: 'Total Records', query: 'total records' },
+                  { label: 'Top B-Parties', query: 'top b parties' },
+                  { label: 'Night Activity', query: 'night activity' },
+                  { label: 'Daily First/Last', query: 'daily first and last call' }
+                ],
+                ipdr: [
+                  { label: 'Total Records', query: 'total records' },
+                  { label: 'Top Source IPs', query: 'top source ips' },
+                  { label: 'Data Volume', query: 'data volume' },
+                  { label: 'Unique MSISDN', query: 'unique msisdn' }
+                ],
+                sdr: [
+                  { label: 'Top Subscribers', query: 'top subscriber names' },
+                  { label: 'Top Numbers', query: 'top phone numbers' },
+                  { label: 'Total Records', query: 'total records' }
+                ],
+                tower: [
+                  { label: 'Top Towers', query: 'top towers' },
+                  { label: 'Top Parties', query: 'top parties' },
+                  { label: 'Total Records', query: 'total records' }
+                ],
+                ild: [
+                  { label: 'Top Countries', query: 'top countries' },
+                  { label: 'Top Called', query: 'top called parties' },
+                  { label: 'Total Records', query: 'total records' }
+                ]
+              };
+
+              const CASE_PROMPTS = [
+                { label: 'Case Summary', query: 'case summary' },
+                { label: 'CDR Overview', query: 'CDR overview' },
+                { label: 'Uploaded Files', query: 'uploaded files' },
+                { label: 'Risk Predict', query: 'crime prediction for this case' }
+              ];
+
+              const NO_CASE_PROMPTS = [
+                { label: 'Tag a Case', query: '@' },
+                { label: 'FIR Summary', query: 'FIR 3 summary' },
+                { label: 'SQL Mode', query: '/sql SELECT COUNT(*) FROM cdr_records' }
+              ];
+
+              const prompts = module && MODULE_PROMPTS[module]
+                ? MODULE_PROMPTS[module]
+                : (hasCase ? CASE_PROMPTS : NO_CASE_PROMPTS);
+
+              return prompts.map((item) => (
+                <button
+                  key={item.label}
+                  type="button"
+                  onClick={() => setInputValue(item.query)}
+                  disabled={isBusy}
+                  className={`px-3 py-1 text-xs rounded-full border transition ${isDarkTheme ? 'bg-slate-800/70 text-slate-300 border-white/10 hover:bg-slate-700/70' : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'}`}
+                >
+                  {item.label}
+                </button>
+              ));
+            })()}
           </div>
 
           <div className="flex-1 overflow-y-auto px-4 py-3 space-y-4 custom-scrollbar">
             {messages.map((msg) => (
               <div key={msg.id} className={`flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
                 <div
-                  className={`max-w-[92%] px-4 py-3 rounded-2xl relative ${
-                    msg.sender === 'user'
-                      ? 'bg-blue-600 text-white text-[14px] leading-6'
-                      : `${isDarkTheme ? 'bg-slate-800/80 border-white/10 text-slate-100' : 'bg-white border-slate-200 text-slate-800'} border chat-prose text-[14px] leading-6`
-                  }`}
+                  className={`max-w-[92%] px-4 py-3 rounded-2xl relative ${msg.sender === 'user'
+                    ? 'bg-blue-600 text-white text-[14px] leading-6'
+                    : `${isDarkTheme ? 'bg-slate-800/80 border-white/10 text-slate-100' : 'bg-white border-slate-200 text-slate-800'} border chat-prose text-[14px] leading-6`
+                    }`}
                 >
                   {msg.sender === 'bot' ? (
                     <>
@@ -1122,7 +1055,15 @@ export const ChatBot: React.FC<ChatBotProps> = ({ caseId, caseType }) => {
                       >
                         <span className="material-symbols-outlined text-[15px]">content_copy</span>
                       </button>
-                      {renderRichMessage(msg.text)}
+                      {msg.answerPayload && msg.answerPayload.version === 'grounded-answer-v1' ? (
+                        <GroundedAnswerCard
+                          payload={msg.answerPayload}
+                          dark={isDarkTheme}
+                          onAction={(action) => handleGroundedAnswerAction(msg, action)}
+                        />
+                      ) : (
+                        renderRichMessage(msg.text)
+                      )}
                       {msg.suggestionMode === 'missing_case_context' && Array.isArray(msg.caseSuggestions) && msg.caseSuggestions.length > 0 ? (
                         <ChatCasePickerCard
                           suggestions={msg.caseSuggestions}
@@ -1173,18 +1114,16 @@ export const ChatBot: React.FC<ChatBotProps> = ({ caseId, caseType }) => {
                   onKeyDown={handleInputKeyDown}
                   placeholder={activeCase ? 'Tag the case again in this message using @ before asking...' : 'Tag a case in this message using @ before asking a case question...'}
                   disabled={isBusy}
-                  className={`w-full rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-1 ${
-                    isDarkTheme
-                      ? 'bg-slate-800/80 text-slate-200 placeholder-slate-500 focus:ring-blue-500'
-                      : 'bg-white text-slate-900 placeholder-slate-400 border border-slate-300 focus:ring-blue-400'
-                  }`}
+                  className={`w-full rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-1 ${isDarkTheme
+                    ? 'bg-slate-800/80 text-slate-200 placeholder-slate-500 focus:ring-blue-500'
+                    : 'bg-white text-slate-900 placeholder-slate-400 border border-slate-300 focus:ring-blue-400'
+                    }`}
                 />
                 {caseSuggestionOpen ? (
                   <div
                     ref={suggestionBoxRef}
-                    className={`absolute left-0 right-0 bottom-[calc(100%+0.5rem)] rounded-xl border shadow-xl overflow-hidden z-20 ${
-                      isDarkTheme ? 'bg-slate-900 border-white/10' : 'bg-white border-slate-200'
-                    }`}
+                    className={`absolute left-0 right-0 bottom-[calc(100%+0.5rem)] rounded-xl border shadow-xl overflow-hidden z-20 ${isDarkTheme ? 'bg-slate-900 border-white/10' : 'bg-white border-slate-200'
+                      }`}
                   >
                     <div className={`px-3 py-2 text-[11px] uppercase tracking-[0.12em] ${isDarkTheme ? 'text-slate-400 bg-slate-950/80' : 'text-slate-500 bg-slate-50'}`}>
                       {isSearchingCases ? 'Searching cases...' : 'Tag a case'}
@@ -1196,12 +1135,11 @@ export const ChatBot: React.FC<ChatBotProps> = ({ caseId, caseType }) => {
                             key={`${suggestion.id}-${suggestion.caseNumber || suggestion.caseName}`}
                             type="button"
                             onClick={() => applyCaseSuggestion(suggestion)}
-                            className={`w-full text-left px-3 py-3 border-b last:border-b-0 ${
-                              isDarkTheme ? 'border-white/5' : 'border-slate-100'
-                            } ${index === caseSuggestionIndex
-                              ? (isDarkTheme ? 'bg-blue-500/15' : 'bg-blue-50')
-                              : (isDarkTheme ? 'hover:bg-slate-800/80' : 'hover:bg-slate-50')
-                            }`}
+                            className={`w-full text-left px-3 py-3 border-b last:border-b-0 ${isDarkTheme ? 'border-white/5' : 'border-slate-100'
+                              } ${index === caseSuggestionIndex
+                                ? (isDarkTheme ? 'bg-blue-500/15' : 'bg-blue-50')
+                                : (isDarkTheme ? 'hover:bg-slate-800/80' : 'hover:bg-slate-50')
+                              }`}
                           >
                             <div className="text-sm font-semibold">{suggestion.caseName || `Case ${suggestion.id}`}</div>
                             <div className={`mt-1 text-xs ${isDarkTheme ? 'text-slate-400' : 'text-slate-500'}`}>

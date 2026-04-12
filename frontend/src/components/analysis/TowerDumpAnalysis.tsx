@@ -8,6 +8,8 @@ import * as XLSX from 'xlsx-js-style';
 import { encodeSpreadsheetRows } from '../lib/security';
 import { RecordTable } from './RecordTable';
 import { AnalysisTabBar } from './AnalysisTabBar';
+import { useChatbotWorkspaceStore } from '../../stores/chatbotWorkspaceStore';
+import { getMetricUiLabel } from '../../lib/caseQaCatalog';
 import { Network, DataSet } from 'vis-network/standalone';
 import 'vis-network/styles/vis-network.css';
 
@@ -926,6 +928,8 @@ export const TowerDumpAnalysis: React.FC<TowerDumpAnalysisProps> = ({
   fileCount,
   onBack
 }) => {
+  const setWorkspaceContext = useChatbotWorkspaceStore((state) => state.setWorkspaceContext);
+  const clearWorkspaceContext = useChatbotWorkspaceStore((state) => state.clearWorkspaceContext);
   const [data, setData] = useState<NormalizedTowerDump[]>(initialData || []);
   const [loading, setLoading] = useState(!initialData && !!caseId);
 
@@ -1084,6 +1088,87 @@ export const TowerDumpAnalysis: React.FC<TowerDumpAnalysisProps> = ({
 
     return filtered;
   }, [selectedTab, data, deferredSearchTerm, callTypeFilter, dateFromFilter, dateToFilter, durationMinFilter, durationMaxFilter]);
+
+  useEffect(() => {
+    if (!caseId) {
+      clearWorkspaceContext();
+      return;
+    }
+
+    const normalizedView = selectedTab === 'graph'
+      ? 'network-graph'
+      : selectedTab === 'party_graph'
+        ? 'party-graph'
+        : selectedTab;
+
+    setWorkspaceContext({
+      caseId,
+      caseTag: caseName || null,
+      module: 'tower',
+      view: normalizedView,
+      filters: selectedTab === 'records'
+        ? {
+            search: searchTerm || null,
+            callType: callTypeFilter || null,
+            dateFrom: dateFromFilter || null,
+            dateTo: dateToFilter || null,
+            durationMin: durationMinFilter || null,
+            durationMax: durationMaxFilter || null
+          }
+        : null,
+      searchState: selectedTab === 'records'
+        ? {
+            query: searchTerm || null,
+            resultCount: filteredData.length
+          }
+        : null,
+      mapState: selectedTab === 'map' || selectedTab === 'graph'
+        ? {
+            selectedTower: selectedTower || null,
+            timeFilter: {
+              startDate: mapTimeFilter.startDate || null,
+              endDate: mapTimeFilter.endDate || null
+            }
+          }
+        : null,
+      graphState: selectedTab === 'party_graph'
+        ? {
+            selectedNode: selectedParty || null,
+            viewMode: partyGraphViewMode,
+            timeFilter: {
+              startDate: partyGraphTimeFilter.startDate || null,
+              endDate: partyGraphTimeFilter.endDate || null
+            }
+          }
+        : null,
+      selectedEntities: selectedParty ? [selectedParty] : selectedTower ? [selectedTower] : [],
+      selectionTimestamp: new Date().toISOString()
+    });
+  }, [
+    caseId,
+    caseName,
+    selectedTab,
+    searchTerm,
+    callTypeFilter,
+    dateFromFilter,
+    dateToFilter,
+    durationMinFilter,
+    durationMaxFilter,
+    filteredData.length,
+    selectedTower,
+    mapTimeFilter.startDate,
+    mapTimeFilter.endDate,
+    selectedParty,
+    partyGraphTimeFilter.startDate,
+    partyGraphTimeFilter.endDate,
+    partyGraphViewMode,
+    setWorkspaceContext,
+    clearWorkspaceContext
+  ]);
+
+  useEffect(() => () => {
+    clearWorkspaceContext();
+  }, [clearWorkspaceContext]);
 
   useEffect(() => {
     if (selectedTab === 'records') {
@@ -1954,7 +2039,7 @@ export const TowerDumpAnalysis: React.FC<TowerDumpAnalysisProps> = ({
               <div className="bg-surface-light dark:bg-surface-dark rounded-xl border border-border-light dark:border-slate-800 p-6">
                 <div className="flex items-center gap-3 mb-2">
                   <span className="material-symbols-outlined text-2xl text-blue-500">description</span>
-                  <h3 className="text-lg font-bold text-slate-900 dark:text-white">Total Records</h3>
+                  <h3 className="text-lg font-bold text-slate-900 dark:text-white">{getMetricUiLabel('total_records', 'Total Records')}</h3>
                 </div>
                 <p className="text-3xl font-black text-blue-600 dark:text-blue-400">{stats.totalRecords.toLocaleString()}</p>
                 <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">From {fileCountState} file(s)</p>

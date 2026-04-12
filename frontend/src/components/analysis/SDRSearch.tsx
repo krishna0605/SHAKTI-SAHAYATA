@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { sdrAPI } from '../lib/apis';
+import { useChatbotWorkspaceStore } from '../../stores/chatbotWorkspaceStore';
 
 type SDRData = Record<string, string | number | null | undefined>;
 
@@ -33,10 +34,35 @@ interface SDRSearchProps {
 }
 
 export const SDRSearch: React.FC<SDRSearchProps> = ({ caseId }) => {
+  const setWorkspaceContext = useChatbotWorkspaceStore((state) => state.setWorkspaceContext);
+  const clearWorkspaceContext = useChatbotWorkspaceStore((state) => state.clearWorkspaceContext);
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<SDRRecord[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  React.useEffect(() => {
+    if (!caseId) {
+      clearWorkspaceContext();
+      return;
+    }
+
+    setWorkspaceContext({
+      caseId,
+      module: 'sdr',
+      view: results.length > 0 ? 'results' : 'search',
+      searchState: {
+        query: query || null,
+        resultCount: results.length,
+        error: error || null
+      },
+      selectionTimestamp: new Date().toISOString()
+    });
+  }, [caseId, query, results.length, error, setWorkspaceContext, clearWorkspaceContext]);
+
+  React.useEffect(() => () => {
+    clearWorkspaceContext();
+  }, [clearWorkspaceContext]);
 
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();

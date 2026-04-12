@@ -5,6 +5,7 @@
  */
 
 import { apiClient, resolveBackendBaseUrl } from '../../lib/apiClient'
+import { isSupabaseConfigured, uploadToSupabaseSignedUrl } from '../../lib/supabase'
 
 type ApiRecord = unknown
 type SdrRecord = Record<string, unknown>
@@ -142,6 +143,52 @@ const buildAbsoluteDownloadUrl = (pathOrUrl: string) => {
   return `${resolveBackendBaseUrl()}${pathOrUrl.startsWith('/') ? '' : '/'}${pathOrUrl}`
 }
 
+const createManagedUpload = async (caseId: string, file: File, expectedType: string) => {
+  const uploadSession = await apiClient.request<{
+    upload: {
+      provider: 'supabase'
+      bucket: string
+      objectPath: string
+      token?: string | null
+      signedUrl?: string | null
+    }
+  }>('/files/upload-session', {
+    method: 'POST',
+    body: {
+      caseId,
+      expectedType,
+      fileType: expectedType,
+      fileName: file.name,
+      originalName: file.name,
+      mimeType: file.type || 'application/octet-stream',
+      fileSize: file.size,
+    },
+  })
+
+  await uploadToSupabaseSignedUrl({
+    bucket: uploadSession.upload.bucket,
+    objectPath: uploadSession.upload.objectPath,
+    token: uploadSession.upload.token,
+    signedUrl: uploadSession.upload.signedUrl,
+    file,
+  })
+
+  return apiClient.request('/files/complete-upload', {
+    method: 'POST',
+    body: {
+      caseId,
+      expectedType,
+      fileType: expectedType,
+      fileName: file.name,
+      originalName: file.name,
+      mimeType: file.type || 'application/octet-stream',
+      fileSize: file.size,
+      storageBucket: uploadSession.upload.bucket,
+      storageObjectPath: uploadSession.upload.objectPath,
+    },
+  })
+}
+
 /* ------------------------------------------------------------------ */
 /*  Auth API                                                          */
 /* ------------------------------------------------------------------ */
@@ -264,12 +311,18 @@ export const caseAPI = {
 /* ------------------------------------------------------------------ */
 export const fileAPI = {
   async upload(caseId: string, file: File, operator: string, fileType?: string): Promise<any> {
+    const expectedType = fileType || 'cdr'
+
+    if (isSupabaseConfigured) {
+      return createManagedUpload(caseId, file, expectedType)
+    }
+
     const form = new FormData()
     form.append('file', file)
     form.append('caseId', caseId)
     form.append('operator', operator)
-    form.append('fileType', fileType || 'cdr')
-    form.append('expectedType', fileType || 'cdr')
+    form.append('fileType', expectedType)
+    form.append('expectedType', expectedType)
 
     return apiClient.request('/files/upload', {
       method: 'POST',
@@ -288,8 +341,11 @@ export const fileAPI = {
     })
   },
 
-  async getDownloadUrl(filePath: string): Promise<string> {
-    const data = await apiClient.request<{ url: string }>(`/files/download-url?path=${encodeURIComponent(filePath)}`)
+  async getDownloadUrl(fileOrPath: string | number): Promise<string> {
+    const endpoint = typeof fileOrPath === 'number' || /^\d+$/.test(String(fileOrPath))
+      ? `/files/${encodeURIComponent(String(fileOrPath))}/download-url`
+      : `/files/download-url?path=${encodeURIComponent(String(fileOrPath))}`
+    const data = await apiClient.request<{ url: string }>(endpoint)
     return buildAbsoluteDownloadUrl(data.url)
   },
 }
@@ -389,21 +445,11 @@ export const settingsAPI = {
 /* ------------------------------------------------------------------ */
 export const ipdrFileAPI = {
   async upload(caseId: string, file: File, operator: string) {
-    const form = new FormData()
-    form.append('file', file)
-    form.append('caseId', caseId)
-    form.append('operator', operator)
-    form.append('expectedType', 'ipdr')
-
-    return apiClient.request('/files/upload/ipdr', {
-      method: 'POST',
-      body: form,
-    })
+    return fileAPI.upload(caseId, file, operator, 'ipdr')
   },
 
-  async getDownloadUrl(filePath: string): Promise<string> {
-    const data = await apiClient.request<{ url: string }>(`/files/download-url?path=${encodeURIComponent(filePath)}`)
-    return buildAbsoluteDownloadUrl(data.url)
+  async getDownloadUrl(fileOrPath: string | number): Promise<string> {
+    return fileAPI.getDownloadUrl(fileOrPath)
   },
 }
 
@@ -412,21 +458,11 @@ export const ipdrFileAPI = {
 /* ------------------------------------------------------------------ */
 export const ildFileAPI = {
   async upload(caseId: string, file: File, operator: string) {
-    const form = new FormData()
-    form.append('file', file)
-    form.append('caseId', caseId)
-    form.append('operator', operator)
-    form.append('expectedType', 'ild')
-
-    return apiClient.request('/files/upload/ild', {
-      method: 'POST',
-      body: form,
-    })
+    return fileAPI.upload(caseId, file, operator, 'ild')
   },
 
-  async getDownloadUrl(filePath: string): Promise<string> {
-    const data = await apiClient.request<{ url: string }>(`/files/download-url?path=${encodeURIComponent(filePath)}`)
-    return buildAbsoluteDownloadUrl(data.url)
+  async getDownloadUrl(fileOrPath: string | number): Promise<string> {
+    return fileAPI.getDownloadUrl(fileOrPath)
   },
 }
 
@@ -435,21 +471,11 @@ export const ildFileAPI = {
 /* ------------------------------------------------------------------ */
 export const towerDumpFileAPI = {
   async upload(caseId: string, file: File, operator: string) {
-    const form = new FormData()
-    form.append('file', file)
-    form.append('caseId', caseId)
-    form.append('operator', operator)
-    form.append('expectedType', 'tower_dump')
-
-    return apiClient.request('/files/upload/tower', {
-      method: 'POST',
-      body: form,
-    })
+    return fileAPI.upload(caseId, file, operator, 'tower_dump')
   },
 
-  async getDownloadUrl(filePath: string): Promise<string> {
-    const data = await apiClient.request<{ url: string }>(`/files/download-url?path=${encodeURIComponent(filePath)}`)
-    return buildAbsoluteDownloadUrl(data.url)
+  async getDownloadUrl(fileOrPath: string | number): Promise<string> {
+    return fileAPI.getDownloadUrl(fileOrPath)
   },
 }
 

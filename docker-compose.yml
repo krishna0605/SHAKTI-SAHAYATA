@@ -8,6 +8,7 @@ services:
   # PostgreSQL 15 (No pgvector, standard image)
   # ──────────────────────────────────────────────
   postgres:
+    profiles: ["local-db"]
     image: postgres:15-alpine
     container_name: shakti-postgres
     environment:
@@ -33,16 +34,17 @@ services:
   # ──────────────────────────────────────────────
   backend:
     build:
-      context: ./backend
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: backend/Dockerfile
     container_name: shakti-backend
     environment:
-      DATABASE_URL: postgresql://${DB_USER:-shakti_admin}:${DB_PASSWORD:-localdevpassword}@postgres:5432/${DB_NAME:-shakti_db}
+      DATABASE_URL: ${SUPABASE_DB_URL_POOLER:-postgresql://${DB_USER:-shakti_admin}:${DB_PASSWORD:-localdevpassword}@postgres:5432/${DB_NAME:-shakti_db}}
       DB_HOST: postgres
       DB_PORT: 5432
       DB_NAME: ${DB_NAME:-shakti_db}
       DB_USER: ${DB_USER:-shakti_admin}
       DB_PASSWORD: ${DB_PASSWORD:-localdevpassword}
+      DB_SSL: ${DB_SSL:-false}
       JWT_SECRET: ${JWT_SECRET}
       JWT_ADMIN_SECRET: ${JWT_ADMIN_SECRET:-}
       JWT_ACCESS_EXPIRY: ${JWT_ACCESS_EXPIRY:-15m}
@@ -68,15 +70,23 @@ services:
       ADMIN_ALLOWED_ORIGINS: ${ADMIN_ALLOWED_ORIGINS:-http://localhost:4174,http://localhost:5173,http://localhost:3000}
       BACKUP_STATUS_FILE: /app/runtime/backup-status.json
       RESTORE_STATUS_FILE: /app/runtime/restore-status.json
+      SUPABASE_URL: ${SUPABASE_URL:-}
+      SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY:-}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:-}
+      SUPABASE_DB_URL_POOLER: ${SUPABASE_DB_URL_POOLER:-}
+      SUPABASE_DB_URL_DIRECT: ${SUPABASE_DB_URL_DIRECT:-}
+      SUPABASE_JWKS_URL: ${SUPABASE_JWKS_URL:-}
+      SUPABASE_JWT_AUDIENCE: ${SUPABASE_JWT_AUDIENCE:-authenticated}
+      SUPABASE_STORAGE_BUCKET_EVIDENCE: ${SUPABASE_STORAGE_BUCKET_EVIDENCE:-case-evidence}
+      SUPABASE_STORAGE_BUCKET_EXPORTS: ${SUPABASE_STORAGE_BUCKET_EXPORTS:-admin-exports}
+      SUPABASE_STORAGE_BUCKET_QUARANTINE: ${SUPABASE_STORAGE_BUCKET_QUARANTINE:-legacy-quarantine}
     ports:
       - "${BACKEND_PORT:-3001}:3001"
     volumes:
       - upload_data:/app/uploads
       - ./ops:/app/ops
       - ./database:/app/database:ro
-    depends_on:
-      postgres:
-        condition: service_healthy
+      - ./shared:/shared:ro
     restart: unless-stopped
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -96,14 +106,12 @@ services:
       OLLAMA_BASE_URL: http://host.docker.internal:11434
       OLLAMA_MODEL: ${OLLAMA_MODEL:-phi3.5}
       OLLAMA_TIMEOUT: ${OLLAMA_TIMEOUT:-60000}
-      DATABASE_URL: postgresql://${DB_USER:-shakti_admin}:${DB_PASSWORD:-localdevpassword}@postgres:5432/${DB_NAME:-shakti_db}
+      DATABASE_URL: ${SUPABASE_DB_URL_POOLER:-postgresql://${DB_USER:-shakti_admin}:${DB_PASSWORD:-localdevpassword}@postgres:5432/${DB_NAME:-shakti_db}}
+      DB_SSL: ${DB_SSL:-false}
       AI_SERVICE_PORT: 8000
       AI_SERVICE_HOST: 0.0.0.0
     ports:
       - "${AI_SERVICE_PORT:-8000}:8000"
-    depends_on:
-      postgres:
-        condition: service_healthy
     restart: unless-stopped
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -115,11 +123,14 @@ services:
   # ──────────────────────────────────────────────
   frontend:
     build:
-      context: ./frontend
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: frontend/Dockerfile
       args:
         BUILD_SCRIPT: build
         DIST_DIR: dist
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:3001}
+        VITE_SUPABASE_URL: ${VITE_SUPABASE_URL:-}
+        VITE_SUPABASE_ANON_KEY: ${VITE_SUPABASE_ANON_KEY:-}
     container_name: shakti-frontend
     ports:
       - "80:80"
@@ -132,11 +143,14 @@ services:
 
   admin-frontend:
     build:
-      context: ./frontend
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: frontend/Dockerfile
       args:
         BUILD_SCRIPT: build:admin
         DIST_DIR: dist-admin
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:3001}
+        VITE_SUPABASE_URL: ${VITE_SUPABASE_URL:-}
+        VITE_SUPABASE_ANON_KEY: ${VITE_SUPABASE_ANON_KEY:-}
     container_name: shakti-admin-frontend
     ports:
       - "${ADMIN_FRONTEND_PORT:-4174}:80"
@@ -161,7 +175,6 @@ services:
       - prometheus_data:/prometheus
     depends_on:
       - backend
-      - postgres
     restart: unless-stopped
     networks:
       - shakti-network
@@ -187,7 +200,7 @@ services:
       - shakti-network
 
   postgres-exporter:
-    profiles: ["observability"]
+    profiles: ["local-db"]
     image: quay.io/prometheuscommunity/postgres-exporter:v0.17.1
     container_name: shakti-postgres-exporter
     environment:

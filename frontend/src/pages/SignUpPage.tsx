@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { AlertCircle, ArrowLeft, BadgeCheck, Eye, EyeOff, ShieldCheck } from 'lucide-react'
 import { useAuthStore } from '../stores/authStore'
 import { api } from '../lib/api'
+import { isSupabaseConfigured, signInWithSupabasePassword } from '../lib/supabase'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
@@ -22,6 +23,7 @@ export default function SignUpPage() {
   const [buckleId, setBuckleId] = useState('')
   const [fullName, setFullName] = useState('')
   const [email, setEmail] = useState('')
+  const [phoneNumber, setPhoneNumber] = useState('')
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [error, setError] = useState('')
@@ -32,6 +34,7 @@ export default function SignUpPage() {
     if (!buckleId.trim()) return 'Buckle ID is required.'
     if (fullName.trim().length < 2) return 'Please enter your full name.'
     if (!email.includes('@')) return 'Please enter a valid email address.'
+    if (phoneNumber.replace(/\D+/g, '').length < 10) return 'Please enter a valid phone number.'
     if (password.length < 8) return 'Password must be at least 8 characters.'
     if (!/[A-Z]/.test(password)) return 'Password must contain at least 1 uppercase letter.'
     if (!/[0-9]/.test(password)) return 'Password must contain at least 1 number.'
@@ -51,13 +54,33 @@ export default function SignUpPage() {
 
     setLoading(true)
     try {
+      const normalizedBuckleId = buckleId.trim()
+      const normalizedFullName = fullName.trim()
+      const normalizedEmail = email.trim().toLowerCase()
+      const normalizedPhoneNumber = phoneNumber.trim()
+
       const data = await api.signup(
-        buckleId.trim(),
-        fullName.trim(),
-        email.trim().toLowerCase(),
+        normalizedBuckleId,
+        normalizedFullName,
+        normalizedEmail,
+        normalizedPhoneNumber,
         password
       )
-      setAuth(data.accessToken, data.user, data.session)
+
+      if (isSupabaseConfigured) {
+        await signInWithSupabasePassword(normalizedEmail, password)
+        const payload = await api.bootstrap({ buckleId: normalizedBuckleId })
+        if (!payload?.authenticated || !payload.accessToken || !payload.user) {
+          throw new Error('Officer account was created, but login bootstrap failed.')
+        }
+        setAuth(payload.accessToken, payload.user, payload.session)
+      } else {
+        if (!data.accessToken || !data.user) {
+          throw new Error('Signup did not return an authenticated officer session.')
+        }
+        setAuth(data.accessToken, data.user, data.session)
+      }
+
       navigate('/dashboard')
     } catch (error: unknown) {
       setError(getErrorMessage(error))
@@ -151,19 +174,36 @@ export default function SignUpPage() {
                   </div>
                 </div>
 
-                <div className="space-y-2">
-                  <label htmlFor="signup-email" className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                    Email Address
-                  </label>
-                  <Input
-                    id="signup-email"
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="officer@police.gov.in"
-                    className="h-12 rounded-xl border-shakti-100 bg-white/80 dark:border-white/10 dark:bg-surface-900/90"
-                    required
-                  />
+                <div className="grid gap-5 sm:grid-cols-2">
+                  <div className="space-y-2">
+                    <label htmlFor="signup-email" className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                      Email Address
+                    </label>
+                    <Input
+                      id="signup-email"
+                      type="email"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      placeholder="officer@police.gov.in"
+                      className="h-12 rounded-xl border-shakti-100 bg-white/80 dark:border-white/10 dark:bg-surface-900/90"
+                      required
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <label htmlFor="signup-phone" className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                      Phone Number
+                    </label>
+                    <Input
+                      id="signup-phone"
+                      type="tel"
+                      value={phoneNumber}
+                      onChange={(e) => setPhoneNumber(e.target.value)}
+                      placeholder="+91 98765 43210"
+                      className="h-12 rounded-xl border-shakti-100 bg-white/80 dark:border-white/10 dark:bg-surface-900/90"
+                      required
+                    />
+                  </div>
                 </div>
 
                 <div className="grid gap-5 sm:grid-cols-2">
@@ -241,7 +281,7 @@ export default function SignUpPage() {
               </p>
               <div className="space-y-4">
                 {[
-                  'Buckle ID-linked identity',
+                  'Buckle ID, email, and phone roster validation',
                   'Repeatable internal testing flow',
                   'Case-first command surface',
                 ].map((item) => (

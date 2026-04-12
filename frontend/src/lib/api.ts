@@ -1,4 +1,5 @@
 import { apiClient } from './apiClient'
+import { isSupabaseConfigured, signOutSupabase } from './supabase'
 
 class ApiClient {
   private async request<T>(endpoint: string, options: {
@@ -21,28 +22,47 @@ class ApiClient {
     })
   }
 
-  async signup(buckleId: string, fullName: string, email: string, password: string) {
-    return this.request<{ accessToken: string; expiresAt: string | null; session: { id: string | null; startedAt: string | null } | null; user: any }>('/auth/signup', {
+  async signup(buckleId: string, fullName: string, email: string, phoneNumber: string, password: string) {
+    return this.request<{
+      signupCompleted?: boolean
+      message?: string
+      accessToken?: string
+      expiresAt?: string | null
+      session?: { id: string | null; startedAt: string | null } | null
+      user?: any
+    }>('/auth/signup', {
       method: 'POST',
-      body: { buckleId, fullName, email, password },
+      body: { buckleId, fullName, email, phoneNumber, password },
       auth: false,
       redirectOn401: false,
     })
   }
 
   async logout() {
-    return this.request('/auth/logout', { method: 'POST' })
+    try {
+      return await this.request('/auth/logout', { method: 'POST' })
+    } finally {
+      if (isSupabaseConfigured) {
+        await signOutSupabase().catch(() => undefined)
+      }
+    }
   }
 
-  async bootstrap() {
+  async bootstrap(options: { buckleId?: string } = {}) {
+    const params = new URLSearchParams()
+    if (options.buckleId) {
+      params.set('buckleId', options.buckleId)
+    }
+
     return this.request<{
       authenticated: boolean
+      error?: string
       accessToken?: string
       expiresAt?: string | null
       session?: { id: string | null; startedAt: string | null } | null
       user?: any
-    }>('/auth/bootstrap', {
-      auth: false,
+    }>(`/auth/bootstrap${params.size ? `?${params.toString()}` : ''}`, {
+      auth: isSupabaseConfigured,
       redirectOn401: false,
       retryOn401: false,
     })

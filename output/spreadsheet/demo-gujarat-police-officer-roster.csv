@@ -1,0 +1,101 @@
+buckle_id,full_name,email,phone_number,department,station,position,rank,is_active
+GJ-POL-2001,Aarav Patel,aarav.patel.2001@gp-demo.local,98710007913,Cyber Crime Cell,Ahmedabad Central,Cyber Analyst,Constable,true
+GJ-POL-2002,Vivaan Desai,vivaan.desai.2002@gp-demo.local,98810015826,Crime Branch,Surat West,Field Investigator,Head Constable,true
+GJ-POL-2003,Aditya Bhatt,aditya.bhatt.2003@gp-demo.local,98910023739,Special Operations Group,Vadodara City,Station Officer,Assistant Sub Inspector,true
+GJ-POL-2004,Vihaan Solanki,vihaan.solanki.2004@gp-demo.local,99010031652,State Intelligence Bureau,Rajkot Urban,Evidence Officer,Sub Inspector,true
+GJ-POL-2005,Arjun Thakkar,arjun.thakkar.2005@gp-demo.local,99110039565,District Investigation Unit,Bhavnagar Rural,Technical Analyst,Inspector,true
+GJ-POL-2006,Sai Modi,sai.modi.2006@gp-demo.local,99210047478,Cyber Crime Cell,Jamnagar North,Case Coordinator,Deputy Superintendent,true
+GJ-POL-2007,Krish Makwana,krish.makwana.2007@gp-demo.local,99310055391,Crime Branch,Gandhinagar HQ,Cyber Analyst,Constable,true
+GJ-POL-2008,Ishaan Shah,ishaan.shah.2008@gp-demo.local,99410063304,Special Operations Group,Junagadh Division,Field Investigator,Head Constable,true
+GJ-POL-2009,Reyansh Joshi,reyansh.joshi.2009@gp-demo.local,99510071217,State Intelligence Bureau,Anand District,Station Officer,Assistant Sub Inspector,true
+GJ-POL-2010,Atharv Panchal,atharv.panchal.2010@gp-demo.local,99610079130,District Investigation Unit,Kutch East,Evidence Officer,Sub Inspector,true
+GJ-POL-2011,Dhruv Chauhan,dhruv.chauhan.2011@gp-demo.local,98710087043,Cyber Crime Cell,Ahmedabad Central,Technical Analyst,Inspector,true
+GJ-POL-2012,Kabir Dave,kabir.dave.2012@gp-demo.local,98810094956,Crime Branch,Surat West,Case Coordinator,Deputy Superintendent,true
+GJ-POL-2013,Rudra Vyas,rudra.vyas.2013@gp-demo.local,98910102869,Special Operations Group,Vadodara City,Cyber Analyst,Constable,true
+GJ-POL-2014,Ayaan Jadeja,ayaan.jadeja.2014@gp-demo.local,99010110782,State Intelligence Bureau,Rajkot Urban,Field Investigator,Head Constable,true
+GJ-POL-2015,Yash Mehta,yash.mehta.2015@gp-demo.local,99110118695,District Investigation Unit,Bhavnagar Rural,Station Officer,Assistant Sub Inspector,true
+GJ-POL-2016,Harsh Trivedi,harsh.trivedi.2016@gp-demo.local,99210126608,Cyber Crime Cell,Jamnagar North,Evidence Officer,Sub Inspector,true
+GJ-POL-2017,Kunal Rana,kunal.rana.2017@gp-demo.local,99310134521,Crime Branch,Gandhinagar HQ,Technical Analyst,Inspector,true
+GJ-POL-2018,Mihir Parmar,mihir.parmar.2018@gp-demo.local,99410142434,Special Operations Group,Junagadh Division,Case Coordinator,Deputy Superintendent,true
+GJ-POL-2019,Rohan Kapoor,rohan.kapoor.2019@gp-demo.local,99510150347,State Intelligence Bureau,Anand District,Cyber Analyst,Constable,true
+GJ-POL-2020,Parth Gohil,parth.gohil.2020@gp-demo.local,99610158260,District Investigation Unit,Kutch East,Field Investigator,Head Constable,true
+GJ-POL-2021,Priyansh Patel,priyansh.patel.2021@gp-demo.local,98710166173,Cyber Crime Cell,Ahmedabad Central,Station Officer,Assistant Sub Inspector,true
+GJ-POL-2022,Nirav Desai,nirav.desai.2022@gp-demo.local,98810174086,Crime Branch,Surat West,Evidence Officer,Sub Inspector,true
+GJ-POL-2023,Jay Bhatt,jay.bhatt.2023@gp-demo.local,98910181999,Special Operations Group,Vadodara City,Technical Analyst,Inspector,true
+GJ-POL-2024,Dev Solanki,dev.solanki.2024@gp-demo.local,99010189912,State Intelligence Bureau,Rajkot Urban,Case Coordinator,Deputy Superintendent,true
+GJ-POL-2025,Rahul Thakkar,rahul.thakkar.2025@gp-demo.local,99110197825,District Investigation Unit,Bhavnagar Rural,Cyber Analyst,Constable,true
+GJ-POL-2026,Nikhil Modi,nikhil.modi.2026@gp-demo.local,99210205738,Cyber Crime Cell,Jamnagar North,Field Investigator,Head Constable,true
+GJ-POL-2027,Manav Makwana,manav.makwana.2027@gp-demo.local,99310213651,Crime Branch,Gandhinagar HQ,Station Officer,Assistant Sub Inspector,true
+GJ-POL-2028,Aniket Shah,aniket.shah.2028@gp-demo.local,99410221564,Special Operations Group,Junagadh Division,Evidence Officer,Sub Inspector,true
+GJ-POL-2029,Siddharth Joshi,siddharth.joshi.2029@gp-demo.local,99510229477,State Intelligence Bureau,Anand District,Technical Analyst,Inspector,true
+GJ-POL-2030,Tushar Panchal,tushar.panchal.2030@gp-demo.local,99610237390,District Investigation Unit,Kutch East,Case Coordinator,Deputy Superintendent,true
+GJ-POL-2031,Mehul Chauhan,mehul.chauhan.2031@gp-demo.local,98710245303,Cyber Crime Cell,Ahmedabad Central,Cyber Analyst,Constable,true
+GJ-POL-2032,Darshan Dave,darshan.dave.2032@gp-demo.local,98810253216,Crime Branch,Surat West,Field Investigator,Head Constable,true
+GJ-POL-2033,Hitesh Vyas,hitesh.vyas.2033@gp-demo.local,98910261129,Special Operations Group,Vadodara City,Station Officer,Assistant Sub Inspector,true
+GJ-POL-2034,Jatin Jadeja,jatin.jadeja.2034@gp-demo.local,99010269042,State Intelligence Bureau,Rajkot Urban,Evidence Officer,Sub Inspector,true
+GJ-POL-2035,Bhargav Mehta,bhargav.mehta.2035@gp-demo.local,99110276955,District Investigation Unit,Bhavnagar Rural,Technical Analyst,Inspector,true
+GJ-POL-2036,Deep Trivedi,deep.trivedi.2036@gp-demo.local,99210284868,Cyber Crime Cell,Jamnagar North,Case Coordinator,Deputy Superintendent,true
+GJ-POL-2037,Karan Rana,karan.rana.2037@gp-demo.local,99310292781,Crime Branch,Gandhinagar HQ,Cyber Analyst,Constable,true
+GJ-POL-2038,Amit Parmar,amit.parmar.2038@gp-demo.local,99410300694,Special Operations Group,Junagadh Division,Field Investigator,Head Constable,true
+GJ-POL-2039,Soham Kapoor,soham.kapoor.2039@gp-demo.local,99510308607,State Intelligence Bureau,Anand District,Station Officer,Assistant Sub Inspector,true
+GJ-POL-2040,Pranav Gohil,pranav.gohil.2040@gp-demo.local,99610316520,District Investigation Unit,Kutch East,Evidence Officer,Sub Inspector,true
+GJ-POL-2041,Neha Patel,neha.patel.2041@gp-demo.local,98710324433,Cyber Crime Cell,Ahmedabad Central,Technical Analyst,Inspector,true
+GJ-POL-2042,Priya Desai,priya.desai.2042@gp-demo.local,98810332346,Crime Branch,Surat West,Case Coordinator,Deputy Superintendent,true
+GJ-POL-2043,Riya Bhatt,riya.bhatt.2043@gp-demo.local,98910340259,Special Operations Group,Vadodara City,Cyber Analyst,Constable,true
+GJ-POL-2044,Kavya Solanki,kavya.solanki.2044@gp-demo.local,99010348172,State Intelligence Bureau,Rajkot Urban,Field Investigator,Head Constable,true
+GJ-POL-2045,Aisha Thakkar,aisha.thakkar.2045@gp-demo.local,99110356085,District Investigation Unit,Bhavnagar Rural,Station Officer,Assistant Sub Inspector,true
+GJ-POL-2046,Ananya Modi,ananya.modi.2046@gp-demo.local,99210363998,Cyber Crime Cell,Jamnagar North,Evidence Officer,Sub Inspector,true
+GJ-POL-2047,Ishita Makwana,ishita.makwana.2047@gp-demo.local,99310371911,Crime Branch,Gandhinagar HQ,Technical Analyst,Inspector,true
+GJ-POL-2048,Mitali Shah,mitali.shah.2048@gp-demo.local,99410379824,Special Operations Group,Junagadh Division,Case Coordinator,Deputy Superintendent,true
+GJ-POL-2049,Pooja Joshi,pooja.joshi.2049@gp-demo.local,99510387737,State Intelligence Bureau,Anand District,Cyber Analyst,Constable,true
+GJ-POL-2050,Sneha Panchal,sneha.panchal.2050@gp-demo.local,99610395650,District Investigation Unit,Kutch East,Field Investigator,Head Constable,true
+GJ-POL-2051,Aarav Chauhan,aarav.chauhan.2051@gp-demo.local,98710403563,Cyber Crime Cell,Ahmedabad Central,Station Officer,Assistant Sub Inspector,true
+GJ-POL-2052,Vivaan Dave,vivaan.dave.2052@gp-demo.local,98810411476,Crime Branch,Surat West,Evidence Officer,Sub Inspector,true
+GJ-POL-2053,Aditya Vyas,aditya.vyas.2053@gp-demo.local,98910419389,Special Operations Group,Vadodara City,Technical Analyst,Inspector,true
+GJ-POL-2054,Vihaan Jadeja,vihaan.jadeja.2054@gp-demo.local,99010427302,State Intelligence Bureau,Rajkot Urban,Case Coordinator,Deputy Superintendent,true
+GJ-POL-2055,Arjun Mehta,arjun.mehta.2055@gp-demo.local,99110435215,District Investigation Unit,Bhavnagar Rural,Cyber Analyst,Constable,true
+GJ-POL-2056,Sai Trivedi,sai.trivedi.2056@gp-demo.local,99210443128,Cyber Crime Cell,Jamnagar North,Field Investigator,Head Constable,true
+GJ-POL-2057,Krish Rana,krish.rana.2057@gp-demo.local,99310451041,Crime Branch,Gandhinagar HQ,Station Officer,Assistant Sub Inspector,true
+GJ-POL-2058,Ishaan Parmar,ishaan.parmar.2058@gp-demo.local,99410458954,Special Operations Group,Junagadh Division,Evidence Officer,Sub Inspector,true
+GJ-POL-2059,Reyansh Kapoor,reyansh.kapoor.2059@gp-demo.local,99510466867,State Intelligence Bureau,Anand District,Technical Analyst,Inspector,true
+GJ-POL-2060,Atharv Gohil,atharv.gohil.2060@gp-demo.local,99610474780,District Investigation Unit,Kutch East,Case Coordinator,Deputy Superintendent,true
+GJ-POL-2061,Dhruv Patel,dhruv.patel.2061@gp-demo.local,98710482693,Cyber Crime Cell,Ahmedabad Central,Cyber Analyst,Constable,true
+GJ-POL-2062,Kabir Desai,kabir.desai.2062@gp-demo.local,98810490606,Crime Branch,Surat West,Field Investigator,Head Constable,true
+GJ-POL-2063,Rudra Bhatt,rudra.bhatt.2063@gp-demo.local,98910498519,Special Operations Group,Vadodara City,Station Officer,Assistant Sub Inspector,true
+GJ-POL-2064,Ayaan Solanki,ayaan.solanki.2064@gp-demo.local,99010506432,State Intelligence Bureau,Rajkot Urban,Evidence Officer,Sub Inspector,true
+GJ-POL-2065,Yash Thakkar,yash.thakkar.2065@gp-demo.local,99110514345,District Investigation Unit,Bhavnagar Rural,Technical Analyst,Inspector,true
+GJ-POL-2066,Harsh Modi,harsh.modi.2066@gp-demo.local,99210522258,Cyber Crime Cell,Jamnagar North,Case Coordinator,Deputy Superintendent,true
+GJ-POL-2067,Kunal Makwana,kunal.makwana.2067@gp-demo.local,99310530171,Crime Branch,Gandhinagar HQ,Cyber Analyst,Constable,true
+GJ-POL-2068,Mihir Shah,mihir.shah.2068@gp-demo.local,99410538084,Special Operations Group,Junagadh Division,Field Investigator,Head Constable,true
+GJ-POL-2069,Rohan Joshi,rohan.joshi.2069@gp-demo.local,99510545997,State Intelligence Bureau,Anand District,Station Officer,Assistant Sub Inspector,true
+GJ-POL-2070,Parth Panchal,parth.panchal.2070@gp-demo.local,99610553910,District Investigation Unit,Kutch East,Evidence Officer,Sub Inspector,true
+GJ-POL-2071,Priyansh Chauhan,priyansh.chauhan.2071@gp-demo.local,98710561823,Cyber Crime Cell,Ahmedabad Central,Technical Analyst,Inspector,true
+GJ-POL-2072,Nirav Dave,nirav.dave.2072@gp-demo.local,98810569736,Crime Branch,Surat West,Case Coordinator,Deputy Superintendent,true
+GJ-POL-2073,Jay Vyas,jay.vyas.2073@gp-demo.local,98910577649,Special Operations Group,Vadodara City,Cyber Analyst,Constable,true
+GJ-POL-2074,Dev Jadeja,dev.jadeja.2074@gp-demo.local,99010585562,State Intelligence Bureau,Rajkot Urban,Field Investigator,Head Constable,true
+GJ-POL-2075,Rahul Mehta,rahul.mehta.2075@gp-demo.local,99110593475,District Investigation Unit,Bhavnagar Rural,Station Officer,Assistant Sub Inspector,true
+GJ-POL-2076,Nikhil Trivedi,nikhil.trivedi.2076@gp-demo.local,99210601388,Cyber Crime Cell,Jamnagar North,Evidence Officer,Sub Inspector,true
+GJ-POL-2077,Manav Rana,manav.rana.2077@gp-demo.local,99310609301,Crime Branch,Gandhinagar HQ,Technical Analyst,Inspector,true
+GJ-POL-2078,Aniket Parmar,aniket.parmar.2078@gp-demo.local,99410617214,Special Operations Group,Junagadh Division,Case Coordinator,Deputy Superintendent,true
+GJ-POL-2079,Siddharth Kapoor,siddharth.kapoor.2079@gp-demo.local,99510625127,State Intelligence Bureau,Anand District,Cyber Analyst,Constable,true
+GJ-POL-2080,Tushar Gohil,tushar.gohil.2080@gp-demo.local,99610633040,District Investigation Unit,Kutch East,Field Investigator,Head Constable,true
+GJ-POL-2081,Mehul Patel,mehul.patel.2081@gp-demo.local,98710640953,Cyber Crime Cell,Ahmedabad Central,Station Officer,Assistant Sub Inspector,true
+GJ-POL-2082,Darshan Desai,darshan.desai.2082@gp-demo.local,98810648866,Crime Branch,Surat West,Evidence Officer,Sub Inspector,true
+GJ-POL-2083,Hitesh Bhatt,hitesh.bhatt.2083@gp-demo.local,98910656779,Special Operations Group,Vadodara City,Technical Analyst,Inspector,true
+GJ-POL-2084,Jatin Solanki,jatin.solanki.2084@gp-demo.local,99010664692,State Intelligence Bureau,Rajkot Urban,Case Coordinator,Deputy Superintendent,true
+GJ-POL-2085,Bhargav Thakkar,bhargav.thakkar.2085@gp-demo.local,99110672605,District Investigation Unit,Bhavnagar Rural,Cyber Analyst,Constable,true
+GJ-POL-2086,Deep Modi,deep.modi.2086@gp-demo.local,99210680518,Cyber Crime Cell,Jamnagar North,Field Investigator,Head Constable,true
+GJ-POL-2087,Karan Makwana,karan.makwana.2087@gp-demo.local,99310688431,Crime Branch,Gandhinagar HQ,Station Officer,Assistant Sub Inspector,true
+GJ-POL-2088,Amit Shah,amit.shah.2088@gp-demo.local,99410696344,Special Operations Group,Junagadh Division,Evidence Officer,Sub Inspector,true
+GJ-POL-2089,Soham Joshi,soham.joshi.2089@gp-demo.local,99510704257,State Intelligence Bureau,Anand District,Technical Analyst,Inspector,true
+GJ-POL-2090,Pranav Panchal,pranav.panchal.2090@gp-demo.local,99610712170,District Investigation Unit,Kutch East,Case Coordinator,Deputy Superintendent,true
+GJ-POL-2091,Neha Chauhan,neha.chauhan.2091@gp-demo.local,98710720083,Cyber Crime Cell,Ahmedabad Central,Cyber Analyst,Constable,true
+GJ-POL-2092,Priya Dave,priya.dave.2092@gp-demo.local,98810727996,Crime Branch,Surat West,Field Investigator,Head Constable,true
+GJ-POL-2093,Riya Vyas,riya.vyas.2093@gp-demo.local,98910735909,Special Operations Group,Vadodara City,Station Officer,Assistant Sub Inspector,true
+GJ-POL-2094,Kavya Jadeja,kavya.jadeja.2094@gp-demo.local,99010743822,State Intelligence Bureau,Rajkot Urban,Evidence Officer,Sub Inspector,true
+GJ-POL-2095,Aisha Mehta,aisha.mehta.2095@gp-demo.local,99110751735,District Investigation Unit,Bhavnagar Rural,Technical Analyst,Inspector,true
+GJ-POL-2096,Ananya Trivedi,ananya.trivedi.2096@gp-demo.local,99210759648,Cyber Crime Cell,Jamnagar North,Case Coordinator,Deputy Superintendent,false
+GJ-POL-2097,Ishita Rana,ishita.rana.2097@gp-demo.local,99310767561,Crime Branch,Gandhinagar HQ,Cyber Analyst,Constable,false
+GJ-POL-2098,Mitali Parmar,mitali.parmar.2098@gp-demo.local,99410775474,Special Operations Group,Junagadh Division,Field Investigator,Head Constable,false
+GJ-POL-2099,Pooja Kapoor,pooja.kapoor.2099@gp-demo.local,99510783387,State Intelligence Bureau,Anand District,Station Officer,Assistant Sub Inspector,false
+GJ-POL-2100,Sneha Gohil,sneha.gohil.2100@gp-demo.local,99610791300,District Investigation Unit,Kutch East,Evidence Officer,Sub Inspector,false

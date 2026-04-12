@@ -1,0 +1,16 @@
+.git
+.github
+.vscode
+.idea
+
+**/node_modules
+**/.vite
+**/coverage
+**/dist
+**/dist-admin
+**/*.log
+
+backend/uploads
+frontend/dist
+frontend/dist-admin
+ops/runtime

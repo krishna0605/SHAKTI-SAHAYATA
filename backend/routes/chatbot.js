@@ -36,6 +36,16 @@ import {
   searchCasesForChat
 } from '../services/chatbot/caseContext.service.js';
 import { extractMessageEntities, mergeSessionEntities } from '../services/chatbot/entity.service.js';
+import {
+  buildWorkspaceContextPrompt,
+  lookupWorkspaceAnswer,
+  mergeWorkspaceContext,
+  normalizeWorkspaceContext
+} from '../services/chatbot/workspaceMemory.service.js';
+import { buildClarificationAnswerPayload } from '../services/chatbot/groundedAnswer.service.js';
+import { resolveMetricDefinition } from '../services/chatbot/metricRegistry.service.js';
+import { classifyGroundability, isGroundableCaseQuestionText } from '../../shared/chatbot/caseQaCatalog.js';
+import { applyFollowUpResolution, generatePlan, buildSessionStatePatch } from '../services/chatbot/planner.service.js';
 import { tryHandleNaturalLanguageDbRequest } from '../services/chatbot/nlDbQuery.service.js';
 import { generateChatbotResponse, generateChatbotResponseStream } from '../services/chatbot/ollama.service.js';
 import { generateCrimePredictionResponse, isCrimePredictionRequest } from '../services/chatbot/crimePrediction.service.js';
@@ -180,11 +190,7 @@ const finalizeResponse = (rawResponse, mode = 'chat') => {
 };
 
 const appendConfidenceBlock = (responseText, confidence, lang = 'en') => {
-  if (!CHATBOT_CONFIDENCE_ENABLED || !confidence) return responseText;
-  if (String(responseText || '').includes('**Confidence**')) return responseText;
-  const block = formatConfidenceBlock(confidence, lang);
-  if (!block) return responseText;
-  return `${responseText}\n\n${block}`;
+  return responseText;
 };
 
 const getStreamState = (res) => res?.locals?.chatbotStreamState || null;
@@ -231,10 +237,87 @@ const sendResponse = ({
   const streamState = getStreamState(res);
   if (streamState?.active) {
     streamState.completed = true;
-    writeStreamEvent(res, { type: 'complete', response: withConfidence, sessionId: session.id, mode, confidence, ...extra });
+    const streamPayload = { type: 'complete', response: withConfidence, sessionId: session.id, mode, confidence, ...extra };
+    if (extra?.answerPayload) streamPayload.answerPayload = extra.answerPayload;
+    writeStreamEvent(res, streamPayload);
     return res.end();
   }
-  res.json({ response: withConfidence, sessionId: session.id, mode, confidence, ...extra });
+  const jsonPayload = { response: withConfidence, sessionId: session.id, mode, confidence, ...extra };
+  if (extra?.answerPayload) jsonPayload.answerPayload = extra.answerPayload;
+  res.json(jsonPayload);
+};
+
+const buildHandlerResult = ({
+  handled = true,
+  responseText = null,
+  mode = 'chat',
+  confidenceInput = {},
+  answerPayload = null,
+  extra = {},
+  sessionPatch = {},
+  logPatch = {}
+} = {}) => ({
+  handled,
+  responseText,
+  mode,
+  confidenceInput,
+  answerPayload,
+  extra: {
+    ...extra,
+    ...(answerPayload ? { answerPayload } : {})
+  },
+  sessionPatch,
+  logPatch
+});
+
+const coerceHandlerResult = (result) => {
+  if (!result) return { handled: false };
+  if (typeof result === 'boolean') return { handled: result, legacy: true };
+  return result;
+};
+
+const dispatchHandlerResult = ({
+  result,
+  res,
+  session,
+  logState,
+  effectiveLanguage,
+  plan
+}) => {
+  const handled = coerceHandlerResult(result);
+  if (!handled?.handled) return false;
+
+  if (handled.logPatch && typeof handled.logPatch === 'object') {
+    Object.assign(logState, handled.logPatch);
+  }
+
+  if (handled.responseText) {
+    sendResponse({
+      res,
+      session,
+      responseText: handled.responseText,
+      mode: handled.mode || 'chat',
+      logState,
+      effectiveLanguage,
+      confidenceInput: handled.confidenceInput || {},
+      extra: handled.extra || {}
+    });
+  }
+
+  if (!handled.legacy) {
+    const plannerPatch = buildSessionStatePatch(plan, handled);
+    const mergedSessionPatch = {
+      ...plannerPatch,
+      ...(handled.sessionPatch || {})
+    };
+    if (Object.keys(mergedSessionPatch).length > 0) {
+      updateSessionState(session.id, mergedSessionPatch);
+    }
+  } else {
+    updateSessionState(session.id, buildSessionStatePatch(plan));
+  }
+
+  return true;
 };
 
 const inferCitationTables = (message, resolvedContext = {}) => {
@@ -362,6 +445,21 @@ const isCaseRelevantQuestion = (message = '') => {
   if (!text) return false;
   if (NON_CASE_PATTERNS.some((pattern) => pattern.test(text))) return false;
   return CASE_RELEVANT_PATTERNS.some((pattern) => pattern.test(text));
+};
+
+const isKnownMetricQuestion = (message = '', resolvedContext = {}) => {
+  const text = extractUserFacingQuestion(message).trim();
+  if (!text) return false;
+
+  const module = resolvedContext?.workspaceContext?.module || resolvedContext?.module || null;
+  return Boolean(resolveMetricDefinition({ message: text, module }));
+};
+
+const isGroundedCaseQuestion = (message = '', resolvedContext = {}) => {
+  const text = extractUserFacingQuestion(message).trim();
+  if (!text) return false;
+  if (isKnownMetricQuestion(text, resolvedContext)) return true;
+  return isGroundableCaseQuestionText(text);
 };
 
 const detectDeterministicCaseFact = (message = '') => {
@@ -602,6 +700,7 @@ const isTagOnlyMessage = (message = '') => /^@"[^"]+"\s*$|^@[a-z0-9][a-z0-9_\-\/
 
 const detectRequestedModule = (message = '', resolvedContext = {}) => {
   const text = String(message || '').trim().toLowerCase();
+  const workspaceModule = resolvedContext?.workspaceContext?.module || null;
   if (!text) return null;
 
   if (/\bfiles?\b|\buploads?\b/.test(text)) return 'files';
@@ -618,7 +717,7 @@ const detectRequestedModule = (message = '', resolvedContext = {}) => {
     return 'overview';
   }
 
-  return resolvedContext.module || null;
+  return workspaceModule || resolvedContext.module || null;
 };
 
 const buildAmbiguousCaseResponse = (candidates = []) =>
@@ -973,6 +1072,38 @@ const handleCaseAwareSummary = async ({ message, session, resolvedContext, effec
   return true;
 };
 
+const handleWorkspaceAwareResponse = async ({ message, resolvedContext, user, queryOptions = {} }) => {
+  const workspaceAnswer = await lookupWorkspaceAnswer({
+    message,
+    resolvedContext,
+    workspaceContext: resolvedContext?.workspaceContext || null,
+    user,
+    queryOptions
+  });
+  if (!workspaceAnswer?.markdown) return { handled: false };
+
+  const knowledge = await fetchCaseKnowledge(resolvedContext.caseId, { user });
+  const responseText = appendSources(
+    finalizeResponse(workspaceAnswer.markdown, workspaceAnswer.mode || 'db_summary'),
+    knowledge,
+    workspaceAnswer.tables || inferCitationTables(message, resolvedContext)
+  );
+
+  return buildHandlerResult({
+    responseText,
+    mode: workspaceAnswer.mode || 'db_summary',
+    answerPayload: workspaceAnswer.answerPayload || null,
+    confidenceInput: workspaceAnswer.confidenceInput || {
+      mode: 'db_summary',
+      intentScore: 0.9,
+      intentLabel: 'workspace_memory'
+    },
+    logPatch: {
+      route: workspaceAnswer.route || 'workspace_memory'
+    }
+  });
+};
+
 const handleDeterministicCaseFact = async ({ message, session, resolvedContext, effectiveLanguage, logState, res, user }) => {
   if (!resolvedContext.caseId) return false;
 
@@ -1090,26 +1221,26 @@ const handleDefaultChat = async ({ session, effectiveLanguage, logState, res, me
     if (!scopeCheck.allowed) {
       logState.route = `rag_block_${scopeCheck.reason || 'policy'}`;
       const blocked = finalizeResponse(scopeCheck.response, 'chat_guidance');
-      sendResponse({
-        res,
-        session,
+      return buildHandlerResult({
         responseText: blocked,
         mode: 'chat_guidance',
-        logState,
-        effectiveLanguage,
-        confidenceInput: { mode: 'chat_guidance', intentScore: 0.4, intentLabel: scopeCheck.reason }
+        confidenceInput: { mode: 'chat_guidance', intentScore: 0.4, intentLabel: scopeCheck.reason },
+        logPatch: {
+          route: `rag_block_${scopeCheck.reason || 'policy'}`
+        }
       });
-      return;
     }
 
     logState.route = 'llm_chat';
-    const focusModule = detectRequestedModule(message, resolvedContext) || resolvedContext?.module || 'overview';
+    const focusModule = detectRequestedModule(message, resolvedContext) || resolvedContext?.module || resolvedContext?.workspaceContext?.module || 'overview';
     const knowledge = resolvedContext?.caseId
       ? await buildCaseKnowledgeContract(resolvedContext.caseId, { user, focusModule })
       : null;
     const caseContextPrompt = knowledge
       ? buildCaseContextPrompt(knowledge, { compact: true, focusModule })
       : '';
+    const workspaceContextPrompt = buildWorkspaceContextPrompt(resolvedContext?.workspaceContext || null);
+    const combinedContextPrompt = [caseContextPrompt, workspaceContextPrompt].filter(Boolean).join('\n\n');
     const streamState = getStreamState(res);
 
     let modelResponse;
@@ -1119,7 +1250,7 @@ const handleDefaultChat = async ({ session, effectiveLanguage, logState, res, me
         session.history,
         {
           language: effectiveLanguage,
-          caseContextPrompt,
+          caseContextPrompt: combinedContextPrompt,
           mode: 'chat'
         },
         {
@@ -1132,7 +1263,7 @@ const handleDefaultChat = async ({ session, effectiveLanguage, logState, res, me
     } else {
       modelResponse = await generateChatbotResponse(session.history, {
         language: effectiveLanguage,
-        caseContextPrompt,
+        caseContextPrompt: combinedContextPrompt,
         mode: 'chat'
       });
     }
@@ -1140,18 +1271,17 @@ const handleDefaultChat = async ({ session, effectiveLanguage, logState, res, me
     let botResponse = finalizeResponse(modelResponse, 'chat');
     botResponse = appendSources(botResponse, knowledge, inferCitationTables(message, resolvedContext));
     rememberPendingSqlFromResponse(session.id, botResponse);
-    sendResponse({
-      res,
-      session,
+    return buildHandlerResult({
       responseText: botResponse,
       mode: 'chat',
-      logState,
-      effectiveLanguage,
       confidenceInput: {
         mode: 'chat',
         ragMatches: ragPreview?.matches || [],
         intentScore: ragPreview?.matches?.length ? 0.7 : null,
         intentLabel: ragPreview?.matches?.length ? 'rag_supported' : ''
+      },
+      logPatch: {
+        route: 'llm_chat'
       }
     });
   } catch (error) {
@@ -1194,7 +1324,7 @@ const chatHandler = async (req, res) => {
   });
 
   try {
-    const { message, sessionId, preferredLanguage, stream } = req.body || {};
+    const { message, sessionId, preferredLanguage, stream, workspaceContext: rawWorkspaceContext } = req.body || {};
     if (stream) {
       res.locals.chatbotStreamState = { active: true, completed: false };
       initializeStream(res);
@@ -1228,6 +1358,7 @@ const chatHandler = async (req, res) => {
     touchSessionById(session.id);
     const context = parseContextFromMessage(messageValidation.text);
     const entities = extractMessageEntities(messageValidation.text, context);
+    let workspaceContext = mergeWorkspaceContext(session.state || {}, rawWorkspaceContext);
     const hasExplicitCaseContext = Boolean(
       context?.caseId
       || context?.caseName
@@ -1237,6 +1368,14 @@ const chatHandler = async (req, res) => {
       || entities?.fir
       || entities?.taggedCaseRef
     );
+    const hasLockedSessionCase = Boolean(
+      session.state?.caseId
+      || session.state?.caseName
+      || session.state?.caseNumber
+      || session.state?.fir
+      || session.state?.taggedCaseRef
+      || workspaceContext?.caseId
+    );
     let resolvedContext = mergeSessionEntities(session.state || {}, entities);
     if (entities?.taggedCaseRef) {
       resolvedContext = {
@@ -1245,7 +1384,7 @@ const chatHandler = async (req, res) => {
         caseName: null
       };
     }
-    if (!hasExplicitCaseContext) {
+    if (!hasExplicitCaseContext && !hasLockedSessionCase) {
       resolvedContext = {
         ...resolvedContext,
         caseId: null,
@@ -1255,9 +1394,26 @@ const chatHandler = async (req, res) => {
         taggedCaseRef: null
       };
     }
+    if (workspaceContext?.caseId && !resolvedContext.caseId) {
+      resolvedContext = {
+        ...resolvedContext,
+        caseId: workspaceContext.caseId
+      };
+    }
     resolvedContext = await hydrateResolvedContext(resolvedContext, req.user || null);
+    workspaceContext = normalizeWorkspaceContext({
+      ...(workspaceContext || {}),
+      caseId: resolvedContext.caseId || workspaceContext?.caseId || null,
+      caseTag: resolvedContext.caseNumber || resolvedContext.caseName || workspaceContext?.caseTag || null,
+      module: workspaceContext?.module || resolvedContext.module || null
+    });
+    resolvedContext = {
+      ...resolvedContext,
+      module: workspaceContext?.module || resolvedContext.module || null,
+      workspaceContext
+    };
     const effectiveLanguage = requestedLanguage || resolvedContext.language || 'en';
-    updateSessionState(session.id, { ...resolvedContext, language: effectiveLanguage });
+    updateSessionState(session.id, { ...resolvedContext, workspaceContext, language: effectiveLanguage });
 
     if (Array.isArray(resolvedContext.ambiguousCases) && resolvedContext.ambiguousCases.length > 0) {
       logState.route = 'ambiguous_case_match';
@@ -1298,7 +1454,53 @@ const chatHandler = async (req, res) => {
       return;
     }
 
-    if (!isCaseRelevantQuestion(messageValidation.text)) {
+    // ─── Planner: classify intent + build scope + route deterministically ───
+    const initialPlan = generatePlan(messageValidation.text, {
+      resolvedContext,
+      workspaceContext,
+      sessionState: session.state || {},
+      hasPendingSql: Boolean(session.state?.pendingSql)
+    });
+    const plan = applyFollowUpResolution(initialPlan, session.state || {});
+
+    // Annotate logState with planner fields
+    Object.assign(logState, plan.logFields);
+    logState.groundability = plan.intent.groundability?.bucket || null;
+
+    if (plan.unresolvedFollowUp) {
+      const clarificationPayload = buildClarificationAnswerPayload({
+        title: plan.unresolvedFollowUp.title || 'Clarify Follow-up',
+        shortAnswer: plan.unresolvedFollowUp.shortAnswer
+          || 'I need a little more grounded context before I can continue this follow-up.',
+        caseId: resolvedContext?.caseId || session.state?.lastCaseId || null,
+        caseLabel: resolvedContext?.caseName || resolvedContext?.caseLabel || null,
+        workspaceContext
+      });
+      dispatchHandlerResult({
+        result: buildHandlerResult({
+          responseText: clarificationPayload.markdown,
+          mode: 'db_summary',
+          answerPayload: clarificationPayload,
+          confidenceInput: {
+            mode: 'db_summary',
+            intentScore: 0.78,
+            intentLabel: plan.unresolvedFollowUp.reason || 'follow_up_clarification'
+          },
+          logPatch: {
+            route: 'follow_up_clarification'
+          }
+        }),
+        res,
+        session,
+        logState,
+        effectiveLanguage,
+        plan
+      });
+      return;
+    }
+
+    // Fast-path: chit-chat rejection
+    if (plan.intent.type === 'chit_chat') {
       logState.route = 'irrelevant_case_question';
       const botResponse = buildIrrelevantCaseQuestionResponse(effectiveLanguage);
       sendResponse({
@@ -1308,7 +1510,7 @@ const chatHandler = async (req, res) => {
         mode: 'chat_guidance',
         logState,
         effectiveLanguage,
-        confidenceInput: { mode: 'chat_guidance', intentScore: 0.88, intentLabel: 'irrelevant_case_question' },
+        confidenceInput: { mode: 'chat_guidance', intentScore: plan.intent.confidence, intentLabel: 'irrelevant_case_question' },
         extra: {
           suggestionMode: 'irrelevant_case_question',
           caseSuggestions: null
@@ -1317,25 +1519,89 @@ const chatHandler = async (req, res) => {
       return;
     }
 
-    if (await handlePendingSql({ message: messageValidation.text, session, effectiveLanguage, logState, res })) return;
-    if (await handleSqlCommand({ message: messageValidation.text, session, effectiveLanguage, logState, res })) return;
-    if (handleSimpleGreeting({ message: messageValidation.text, session, effectiveLanguage, logState, res })) return;
-    if (await handleDeterministicCaseFact({ message: messageValidation.text, session, resolvedContext, effectiveLanguage, logState, res, user: req.user || null })) return;
-    if (await handleDeterministicCaseInsight({ message: messageValidation.text, session, resolvedContext, effectiveLanguage, logState, res, user: req.user || null })) return;
-    if (await handleCaseAwareSummary({ message: messageValidation.text, session, resolvedContext, effectiveLanguage, logState, res, user: req.user || null })) return;
-    if (await handleFirSummary({ message: messageValidation.text, session, resolvedContext, effectiveLanguage, logState, res, user: req.user || null })) return;
-    if (await handleCrimePrediction({
-      message: messageValidation.text,
+    const effectiveMessage = plan.messageOverride || messageValidation.text;
+    const effectiveWorkspaceContext = plan.workspaceContextOverride
+      ? normalizeWorkspaceContext(plan.workspaceContextOverride)
+      : workspaceContext;
+    const effectiveResolvedContext = {
+      ...resolvedContext,
+      module: plan.scope?.module || resolvedContext.module || effectiveWorkspaceContext?.module || null,
+      workspaceContext: effectiveWorkspaceContext || resolvedContext.workspaceContext || null
+    };
+
+    // Build unified handler context object
+    const handlerCtx = {
+      message: effectiveMessage,
       session,
-      resolvedContext,
+      resolvedContext: effectiveResolvedContext,
       effectiveLanguage,
       logState,
-      res
-    })) return;
-    if (handleOpenCdr({ message: messageValidation.text, session, context, resolvedContext, effectiveLanguage, logState, res })) return;
-    if (await handleDirectDbRequest({ message: messageValidation.text, session, resolvedContext, effectiveLanguage, logState, res, user: req.user || null })) return;
+      res,
+      user: req.user || null,
+      context,
+      plan,
+      queryOptions: plan.queryOptions || {}
+    };
 
-    await handleDefaultChat({ session, effectiveLanguage, logState, res, message: messageValidation.text, resolvedContext, user: req.user || null });
+    // Handler dispatch table
+    const handlers = {
+      handlePendingSql: () => handlePendingSql(handlerCtx),
+      handleSqlCommand: () => handleSqlCommand(handlerCtx),
+      handleSimpleGreeting: () => handleSimpleGreeting(handlerCtx),
+      handleChitChatRejection: () => false, // already handled above
+      handleWorkspaceAwareResponse: () => handleWorkspaceAwareResponse(handlerCtx),
+      handleDeterministicCaseFact: () => handleDeterministicCaseFact(handlerCtx),
+      handleDeterministicCaseInsight: () => handleDeterministicCaseInsight(handlerCtx),
+      handleCaseAwareSummary: () => handleCaseAwareSummary(handlerCtx),
+      handleFirSummary: () => handleFirSummary(handlerCtx),
+      handleCrimePrediction: () => handleCrimePrediction(handlerCtx),
+      handleOpenCdr: () => handleOpenCdr(handlerCtx),
+      handleDirectDbRequest: () => handleDirectDbRequest(handlerCtx),
+      handleDefaultChat: () => handleDefaultChat({ ...handlerCtx, message: effectiveMessage })
+    };
+
+    // Try primary handler first
+    const primaryFn = handlers[plan.primaryHandler];
+    const primaryResult = primaryFn ? await primaryFn() : null;
+    if (dispatchHandlerResult({
+      result: primaryResult,
+      res,
+      session,
+      logState,
+      effectiveLanguage,
+      plan
+    })) {
+      return;
+    }
+
+    // Fallback chain
+    for (const fallbackName of plan.fallbacks) {
+      const fallbackFn = handlers[fallbackName];
+      const fallbackResult = fallbackFn ? await fallbackFn() : null;
+      logState.planner_fallback = fallbackName;
+      if (dispatchHandlerResult({
+        result: fallbackResult,
+        res,
+        session,
+        logState,
+        effectiveLanguage,
+        plan
+      })) {
+        return;
+      }
+      delete logState.planner_fallback;
+    }
+
+    // Last resort: default chat (LLM)
+    const defaultResult = await handleDefaultChat({ ...handlerCtx, message: effectiveMessage });
+    dispatchHandlerResult({
+      result: defaultResult,
+      res,
+      session,
+      logState,
+      effectiveLanguage,
+      plan
+    });
   } catch (error) {
     console.error('Chatbot handler error:', error);
     logState.action = 'chatbot_error';
@@ -1347,7 +1613,7 @@ const chatHandler = async (req, res) => {
 };
 
 const intentHandler = async (req, res) => {
-  const { query, file_id, case_id, case_name, case_type, sessionId, preferredLanguage, stream } = req.body || {};
+  const { query, file_id, case_id, case_name, case_type, sessionId, preferredLanguage, stream, workspaceContext } = req.body || {};
   if (!query) return res.status(400).json({ error: 'query is required' });
 
   const context = [];
@@ -1362,7 +1628,7 @@ const intentHandler = async (req, res) => {
     message = `Context:\n${context.join('\n')}\n\nUser: ${trimmedQuery}`;
   }
   return chatHandler({
-    body: { message, sessionId, preferredLanguage, stream },
+    body: { message, sessionId, preferredLanguage, stream, workspaceContext },
     headers: req.headers,
     ip: req.ip,
     user: req.user || null,

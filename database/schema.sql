@@ -514,6 +514,34 @@ CREATE INDEX IF NOT EXISTS idx_chat_user ON chat_history(user_id);
 CREATE INDEX IF NOT EXISTS idx_chat_created ON chat_history(created_at);
 
 -- ============================================================
+-- 017A: case_memory_snapshots — Persistent case / module memory
+-- ============================================================
+CREATE TABLE IF NOT EXISTS case_memory_snapshots (
+    id                  SERIAL PRIMARY KEY,
+    case_id             INTEGER NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
+    module              VARCHAR(30) NOT NULL,
+    view                VARCHAR(50) NOT NULL DEFAULT 'overview',
+    snapshot_kind       VARCHAR(30) NOT NULL DEFAULT 'module_summary'
+                        CHECK (snapshot_kind IN ('case_summary', 'module_summary', 'file_summary', 'view_bundle', 'record_query', 'grounding_packet')),
+    file_ids            INTEGER[] DEFAULT '{}'::INTEGER[],
+    file_scope_key      TEXT NOT NULL DEFAULT '__all__',
+    filter_hash         VARCHAR(64) NOT NULL DEFAULT 'none',
+    filters             JSONB DEFAULT '{}'::jsonb,
+    facts               JSONB DEFAULT '{}'::jsonb,
+    insights            JSONB DEFAULT '{}'::jsonb,
+    artifacts           JSONB DEFAULT '{}'::jsonb,
+    sources             JSONB DEFAULT '{}'::jsonb,
+    generated_at        TIMESTAMPTZ DEFAULT NOW(),
+    updated_at          TIMESTAMPTZ DEFAULT NOW(),
+    version             VARCHAR(40) NOT NULL DEFAULT 'case-memory-v1',
+    CONSTRAINT unique_case_memory_scope UNIQUE (case_id, module, view, snapshot_kind, file_scope_key, filter_hash)
+);
+CREATE INDEX IF NOT EXISTS idx_case_memory_case ON case_memory_snapshots(case_id);
+CREATE INDEX IF NOT EXISTS idx_case_memory_module ON case_memory_snapshots(case_id, module);
+CREATE INDEX IF NOT EXISTS idx_case_memory_scope ON case_memory_snapshots(case_id, module, view, snapshot_kind);
+CREATE INDEX IF NOT EXISTS idx_case_memory_generated ON case_memory_snapshots(generated_at DESC);
+
+-- ============================================================
 -- 018: evidence_exports (§42.2)
 -- ============================================================
 CREATE TABLE IF NOT EXISTS evidence_exports (
@@ -537,19 +565,37 @@ CREATE INDEX IF NOT EXISTS idx_exports_user ON evidence_exports(user_id);
 -- ============================================================
 CREATE TABLE IF NOT EXISTS officer_imports (
     id                  SERIAL PRIMARY KEY,
-    imported_by         INTEGER NOT NULL REFERENCES users(id),
+    imported_by         INTEGER REFERENCES users(id),
+    imported_by_admin_account_id INTEGER REFERENCES admin_accounts(id) ON DELETE SET NULL,
     file_checksum       VARCHAR(64) NOT NULL,
     original_filename   VARCHAR(500) NOT NULL,
     total_rows          INTEGER NOT NULL,
     new_count           INTEGER DEFAULT 0,
     updated_count       INTEGER DEFAULT 0,
     deactivated_count   INTEGER DEFAULT 0,
+    skipped_count       INTEGER DEFAULT 0,
+    invalid_count       INTEGER DEFAULT 0,
+    duplicate_buckle_count INTEGER DEFAULT 0,
+    missing_buckle_count INTEGER DEFAULT 0,
     error_count         INTEGER DEFAULT 0,
     changes_json        JSONB,
+    validation_errors   JSONB,
+    import_mode         VARCHAR(20) DEFAULT 'merge'
+                        CHECK (import_mode IN ('merge', 'full_sync')),
     status              VARCHAR(20) DEFAULT 'applied'
                         CHECK (status IN ('applied', 'rolled_back', 'failed')),
     created_at          TIMESTAMPTZ DEFAULT NOW()
 );
+ALTER TABLE officer_imports ALTER COLUMN imported_by DROP NOT NULL;
+ALTER TABLE officer_imports ADD COLUMN IF NOT EXISTS imported_by_admin_account_id INTEGER REFERENCES admin_accounts(id) ON DELETE SET NULL;
+ALTER TABLE officer_imports ADD COLUMN IF NOT EXISTS skipped_count INTEGER DEFAULT 0;
+ALTER TABLE officer_imports ADD COLUMN IF NOT EXISTS invalid_count INTEGER DEFAULT 0;
+ALTER TABLE officer_imports ADD COLUMN IF NOT EXISTS duplicate_buckle_count INTEGER DEFAULT 0;
+ALTER TABLE officer_imports ADD COLUMN IF NOT EXISTS missing_buckle_count INTEGER DEFAULT 0;
+ALTER TABLE officer_imports ADD COLUMN IF NOT EXISTS validation_errors JSONB;
+ALTER TABLE officer_imports ADD COLUMN IF NOT EXISTS import_mode VARCHAR(20) DEFAULT 'merge'
+                        CHECK (import_mode IN ('merge', 'full_sync'));
+CREATE INDEX IF NOT EXISTS idx_officer_imports_admin_account ON officer_imports(imported_by_admin_account_id);
 
 -- ============================================================
 -- 020: archived_cases (§45.1.1)
@@ -878,3 +924,105 @@ INSERT INTO app_settings (key, value) VALUES
     ('rate_limit_window', '900000'),
     ('rate_limit_max', '100')
 ON CONFLICT (key) DO NOTHING;
+
+-- ============================================================
+-- 029: Supabase migration support
+-- ============================================================
+ALTER TABLE users
+    ADD COLUMN IF NOT EXISTS auth_user_id UUID,
+    ADD COLUMN IF NOT EXISTS migration_cleanup_status VARCHAR(30) DEFAULT 'keep'
+        CHECK (migration_cleanup_status IN ('keep', 'quarantine', 'delete_later', 'migrated', 'skipped')),
+    ADD COLUMN IF NOT EXISTS migration_cleanup_reason TEXT,
+    ADD COLUMN IF NOT EXISTS migration_quarantine_ref TEXT,
+    ADD COLUMN IF NOT EXISTS migration_migrated_at TIMESTAMPTZ;
+
+ALTER TABLE admin_accounts
+    ADD COLUMN IF NOT EXISTS auth_user_id UUID,
+    ADD COLUMN IF NOT EXISTS migration_cleanup_status VARCHAR(30) DEFAULT 'keep'
+        CHECK (migration_cleanup_status IN ('keep', 'quarantine', 'delete_later', 'migrated', 'skipped')),
+    ADD COLUMN IF NOT EXISTS migration_cleanup_reason TEXT,
+    ADD COLUMN IF NOT EXISTS migration_quarantine_ref TEXT,
+    ADD COLUMN IF NOT EXISTS migration_migrated_at TIMESTAMPTZ;
+
+ALTER TABLE uploaded_files
+    ADD COLUMN IF NOT EXISTS storage_provider VARCHAR(30) DEFAULT 'local'
+        CHECK (storage_provider IN ('local', 'supabase', 'quarantine')),
+    ADD COLUMN IF NOT EXISTS storage_bucket TEXT,
+    ADD COLUMN IF NOT EXISTS storage_object_path TEXT,
+    ADD COLUMN IF NOT EXISTS storage_object_version TEXT,
+    ADD COLUMN IF NOT EXISTS storage_uploaded_at TIMESTAMPTZ,
+    ADD COLUMN IF NOT EXISTS migration_cleanup_status VARCHAR(30) DEFAULT 'keep'
+        CHECK (migration_cleanup_status IN ('keep', 'quarantine', 'delete_later', 'migrated', 'skipped')),
+    ADD COLUMN IF NOT EXISTS migration_cleanup_reason TEXT,
+    ADD COLUMN IF NOT EXISTS migration_quarantine_ref TEXT,
+    ADD COLUMN IF NOT EXISTS migration_migrated_at TIMESTAMPTZ;
+
+ALTER TABLE ingestion_jobs
+    ADD COLUMN IF NOT EXISTS storage_provider VARCHAR(30) DEFAULT 'local'
+        CHECK (storage_provider IN ('local', 'supabase', 'quarantine')),
+    ADD COLUMN IF NOT EXISTS storage_bucket TEXT,
+    ADD COLUMN IF NOT EXISTS storage_object_path TEXT,
+    ADD COLUMN IF NOT EXISTS storage_uploaded_at TIMESTAMPTZ,
+    ADD COLUMN IF NOT EXISTS migration_cleanup_status VARCHAR(30) DEFAULT 'keep'
+        CHECK (migration_cleanup_status IN ('keep', 'quarantine', 'delete_later', 'migrated', 'skipped')),
+    ADD COLUMN IF NOT EXISTS migration_cleanup_reason TEXT,
+    ADD COLUMN IF NOT EXISTS migration_quarantine_ref TEXT,
+    ADD COLUMN IF NOT EXISTS migration_migrated_at TIMESTAMPTZ;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_auth_user_id ON users(auth_user_id) WHERE auth_user_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_admin_accounts_auth_user_id ON admin_accounts(auth_user_id) WHERE auth_user_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_uploaded_files_storage_object ON uploaded_files(storage_bucket, storage_object_path);
+CREATE INDEX IF NOT EXISTS idx_uploaded_files_cleanup_status ON uploaded_files(migration_cleanup_status);
+CREATE INDEX IF NOT EXISTS idx_ingestion_jobs_storage_object ON ingestion_jobs(storage_bucket, storage_object_path);
+CREATE INDEX IF NOT EXISTS idx_ingestion_jobs_cleanup_status ON ingestion_jobs(migration_cleanup_status);
+
+-- ============================================================
+-- 030: migration_cleanup_reports
+-- ============================================================
+CREATE TABLE IF NOT EXISTS migration_cleanup_reports (
+    id                          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    generated_by_admin_id       INTEGER REFERENCES admin_accounts(id) ON DELETE SET NULL,
+    status                      VARCHAR(30) NOT NULL DEFAULT 'draft'
+                                CHECK (status IN ('draft', 'inventory_complete', 'quarantined', 'verified', 'delete_ready', 'archived')),
+    classification_summary      JSONB NOT NULL DEFAULT '{}'::jsonb,
+    totals_by_type              JSONB NOT NULL DEFAULT '{}'::jsonb,
+    notes                       TEXT,
+    baseline_snapshot_ref       TEXT,
+    quarantine_root             TEXT,
+    rollback_bundle_ref         TEXT,
+    created_at                  TIMESTAMPTZ DEFAULT NOW(),
+    updated_at                  TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_migration_cleanup_reports_created_at ON migration_cleanup_reports(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_migration_cleanup_reports_status ON migration_cleanup_reports(status);
+
+-- ============================================================
+-- 031: migration_cleanup_items
+-- ============================================================
+CREATE TABLE IF NOT EXISTS migration_cleanup_items (
+    id                          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    report_id                   UUID NOT NULL REFERENCES migration_cleanup_reports(id) ON DELETE CASCADE,
+    item_type                   VARCHAR(40) NOT NULL,
+    classification              VARCHAR(30) NOT NULL
+                                CHECK (classification IN ('keep', 'quarantine', 'delete_later', 'migrated', 'skipped')),
+    reason_code                 VARCHAR(80),
+    reason_detail               TEXT,
+    resource_id                 TEXT,
+    linked_case_id              INTEGER REFERENCES cases(id) ON DELETE SET NULL,
+    linked_file_id              INTEGER REFERENCES uploaded_files(id) ON DELETE SET NULL,
+    linked_user_id              INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    linked_admin_account_id     INTEGER REFERENCES admin_accounts(id) ON DELETE SET NULL,
+    source_path                 TEXT,
+    quarantine_path             TEXT,
+    metadata                    JSONB NOT NULL DEFAULT '{}'::jsonb,
+    delete_eligible             BOOLEAN NOT NULL DEFAULT FALSE,
+    deleted_at                  TIMESTAMPTZ,
+    migrated_at                 TIMESTAMPTZ,
+    created_at                  TIMESTAMPTZ DEFAULT NOW(),
+    updated_at                  TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_migration_cleanup_items_report ON migration_cleanup_items(report_id);
+CREATE INDEX IF NOT EXISTS idx_migration_cleanup_items_classification ON migration_cleanup_items(classification);
+CREATE INDEX IF NOT EXISTS idx_migration_cleanup_items_item_type ON migration_cleanup_items(item_type);

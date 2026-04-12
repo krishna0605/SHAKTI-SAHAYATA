@@ -1,3 +1,10 @@
+import {
+  getSupabaseAccessToken,
+  isSupabaseConfigured,
+  refreshSupabaseSession,
+  signOutSupabase,
+} from './supabase'
+
 let inMemoryAccessToken: string | null = null
 let authFailureHandler: (() => void) | null = null
 let refreshPromise: Promise<boolean> | null = null
@@ -111,6 +118,20 @@ class CanonicalApiClient {
 
     refreshPromise = (async () => {
       try {
+        if (isSupabaseConfigured) {
+          const session = await refreshSupabaseSession()
+          const nextToken = session?.access_token ?? null
+          if (!nextToken) {
+            clearAccessToken()
+            authFailureHandler?.()
+            if (redirectOn401) redirectToLogin()
+            return false
+          }
+
+          setAccessToken(nextToken)
+          return true
+        }
+
         const { response, data } = await this.fetchJson<{ accessToken?: string }>('/auth/refresh', {
           method: 'POST',
           headers: {
@@ -136,6 +157,9 @@ class CanonicalApiClient {
           throw error
         }
         clearAccessToken()
+        if (isSupabaseConfigured) {
+          await signOutSupabase().catch(() => undefined)
+        }
         authFailureHandler?.()
         if (redirectOn401) redirectToLogin()
         return false
@@ -157,7 +181,9 @@ class CanonicalApiClient {
       retryOn401 = true,
     } = options
 
-    const token = auth ? getAccessToken() : null
+    const token = auth
+      ? (getAccessToken() || (isSupabaseConfigured ? await getSupabaseAccessToken() : null))
+      : null
     const isFormData = typeof FormData !== 'undefined' && body instanceof FormData
 
     const requestHeaders: Record<string, string> = {
@@ -196,6 +222,9 @@ class CanonicalApiClient {
     if (!response.ok) {
       if (response.status === 401 && redirectOn401) {
         clearAccessToken()
+        if (isSupabaseConfigured) {
+          await signOutSupabase().catch(() => undefined)
+        }
         authFailureHandler?.()
         redirectToLogin()
       }

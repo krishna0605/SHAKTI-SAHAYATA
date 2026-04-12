@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { AlertCircle, ArrowLeft, Eye, EyeOff, ShieldCheck } from 'lucide-react'
 import { useAuthStore } from '../stores/authStore'
 import { api } from '../lib/api'
+import { isSupabaseConfigured, signInWithSupabasePassword } from '../lib/supabase'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
@@ -32,7 +33,24 @@ export default function LoginPage() {
     setLoading(true)
 
     try {
-      const data = await api.login(buckleId.trim(), email.trim().toLowerCase(), password)
+      const normalizedBuckleId = buckleId.trim()
+      const normalizedEmail = email.trim().toLowerCase()
+
+      const data = isSupabaseConfigured
+        ? await (async () => {
+            await signInWithSupabasePassword(normalizedEmail, password)
+            const payload = await api.bootstrap({ buckleId: normalizedBuckleId })
+            if (!payload?.authenticated || !payload.accessToken || !payload.user) {
+              throw new Error(payload?.error || 'Your credentials are wrong')
+            }
+            return payload
+          })()
+        : await api.login(normalizedBuckleId, normalizedEmail, password)
+
+      if (!data.accessToken || !data.user) {
+        throw new Error('Login did not return an authenticated user session.')
+      }
+
       setAuth(data.accessToken, data.user, data.session)
       navigate('/dashboard')
     } catch (error: unknown) {
@@ -175,7 +193,7 @@ export default function LoginPage() {
               <div className="rounded-2xl border border-shakti-300/25 bg-shakti-50 px-4 py-3 text-sm text-slate-700 dark:border-shakti-400/20 dark:bg-shakti-500/10 dark:text-slate-200">
                 <div className="flex items-start gap-3">
                   <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-shakti-600 dark:text-shakti-300" />
-                  <span>Your session is validated against authorized officer records and hardened for internal department testing.</span>
+                  <span>Your session is validated against authorized officer records and hardened for internal department testing{isSupabaseConfigured ? ' through Supabase Auth.' : '.'}</span>
                 </div>
               </div>
             </CardContent>

@@ -30,6 +30,8 @@ import graphqlRoutes from './routes/graphql.js';
 import adminAuthRoutes from './routes/admin/auth.js';
 import adminConsoleRoutes from './routes/admin/console.js';
 import adminOperationsRoutes from './routes/admin/operations.js';
+import adminMigrationCleanupRoutes from './routes/admin/migrationCleanup.js';
+import adminOfficerRosterRoutes from './routes/admin/officerRoster.js';
 import { adminOriginGuard } from './middleware/admin/adminOriginGuard.js';
 import { adminNetworkGuard } from './middleware/admin/adminNetworkGuard.js';
 
@@ -104,6 +106,8 @@ export const createApp = () => {
   app.use('/api/admin/auth', adminAuthRoutes);
   app.use('/api/admin', rateLimit, adminConsoleRoutes);
   app.use('/api/admin', rateLimit, adminOperationsRoutes);
+  app.use('/api/admin/migration-cleanup', rateLimit, adminMigrationCleanupRoutes);
+  app.use('/api/admin/officer-roster', rateLimit, adminOfficerRosterRoutes);
   app.use('/api/cases', rateLimit, casesRoutes);
   app.use('/api/files', rateLimit, filesRoutes);
   app.use('/api/dashboard', rateLimit, dashboardRoutes);

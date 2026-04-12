@@ -3,6 +3,8 @@ import { GraphQLError, buildSchema, graphql } from 'graphql';
 import pool from '../config/database.js';
 import { verifyAccessToken } from '../config/auth.js';
 import { verifyAdminAccessToken } from '../config/adminAuth.js';
+import { verifySupabaseAccessToken } from '../config/supabase.js';
+import { getAdminProfileByAuthUserId, getOfficerProfileByAuthUserId } from '../services/auth/authIdentity.service.js';
 import { getLiveHealth, getReadyHealth, getStartupStatus } from '../services/runtimeStatus.service.js';
 
 const router = Router();
@@ -53,7 +55,7 @@ const toHealthSnapshot = (payload = {}) => ({
   degraded: Array.isArray(payload.summary?.degraded) ? payload.summary.degraded : [],
 });
 
-const buildGraphqlContext = (req) => {
+const buildGraphqlContext = async (req) => {
   const authHeader = req.headers.authorization;
   const token = authHeader && authHeader.split(' ')[1];
 
@@ -72,6 +74,21 @@ const buildGraphqlContext = (req) => {
     return {
       user: null,
       admin: admin?.accountType === 'it_admin' ? admin : null,
+    };
+  } catch {
+    // continue to Supabase token verification
+  }
+
+  try {
+    const claims = await verifySupabaseAccessToken(token);
+    const [user, admin] = await Promise.all([
+      getOfficerProfileByAuthUserId(claims.sub),
+      getAdminProfileByAuthUserId(claims.sub),
+    ]);
+
+    return {
+      user: user ? { userId: user.id, role: user.role, buckleId: user.buckle_id } : null,
+      admin: admin ? { adminId: admin.id, role: admin.role, accountType: admin.role } : null,
     };
   } catch {
     return { user: null, admin: null };
@@ -244,7 +261,7 @@ const executeGraphqlRequest = async (req, res) => {
     return res.status(400).json({ errors: [{ message: 'GraphQL query is required.' }] });
   }
 
-  const contextValue = buildGraphqlContext(req);
+  const contextValue = await buildGraphqlContext(req);
   const variableValues = req.method === 'GET'
     ? parseGraphqlVariables(req.query.variables)
     : parseGraphqlVariables(req.body?.variables);

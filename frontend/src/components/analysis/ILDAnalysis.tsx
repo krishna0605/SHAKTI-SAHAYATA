@@ -9,6 +9,8 @@ import { RecordTable } from './RecordTable';
 import { AnalysisTabBar } from './AnalysisTabBar';
 import { type NormalizedILD } from '../utils/ildNormalization';
 import { ildAPI } from '../lib/apis';
+import { useChatbotWorkspaceStore } from '../../stores/chatbotWorkspaceStore';
+import { getMetricUiLabel } from '../../lib/caseQaCatalog';
 
 interface ILDAnalysisProps {
   caseId?: string;
@@ -473,6 +475,8 @@ const buildIldSheets = (records: NormalizedILD[], operator?: string) => {
 };
 
 export const ILDAnalysis: React.FC<ILDAnalysisProps> = ({ caseId, caseName, operator, parsedData, fileCount = 1, onBack }) => {
+  const setWorkspaceContext = useChatbotWorkspaceStore((state) => state.setWorkspaceContext);
+  const clearWorkspaceContext = useChatbotWorkspaceStore((state) => state.clearWorkspaceContext);
   const [data, setData] = useState<NormalizedILD[]>(parsedData || []);
   const [isLoading, setIsLoading] = useState(!parsedData || parsedData.length === 0);
   const [selectedTab, setSelectedTab] = useState<TabId>('overview');
@@ -596,6 +600,56 @@ export const ILDAnalysis: React.FC<ILDAnalysisProps> = ({ caseId, caseName, oper
     }
     return filtered;
   }, [data, searchTerm, callTypeFilter, directionFilter, dateFromFilter, dateToFilter, durationMinFilter, durationMaxFilter]);
+
+  useEffect(() => {
+    if (!caseId) {
+      clearWorkspaceContext();
+      return;
+    }
+
+    setWorkspaceContext({
+      caseId,
+      caseTag: caseName || null,
+      module: 'ild',
+      view: selectedTab,
+      filters: selectedTab === 'records'
+        ? {
+            search: searchTerm || null,
+            callType: callTypeFilter || null,
+            direction: directionFilter || null,
+            dateFrom: dateFromFilter || null,
+            dateTo: dateToFilter || null,
+            durationMin: durationMinFilter || null,
+            durationMax: durationMaxFilter || null
+          }
+        : null,
+      searchState: selectedTab === 'records'
+        ? {
+            query: searchTerm || null,
+            resultCount: filteredRecords.length
+          }
+        : null,
+      selectionTimestamp: new Date().toISOString()
+    });
+  }, [
+    caseId,
+    caseName,
+    selectedTab,
+    searchTerm,
+    callTypeFilter,
+    directionFilter,
+    dateFromFilter,
+    dateToFilter,
+    durationMinFilter,
+    durationMaxFilter,
+    filteredRecords.length,
+    setWorkspaceContext,
+    clearWorkspaceContext
+  ]);
+
+  useEffect(() => () => {
+    clearWorkspaceContext();
+  }, [clearWorkspaceContext]);
 
   useEffect(() => {
     setCurrentPage(1);
@@ -787,10 +841,10 @@ export const ILDAnalysis: React.FC<ILDAnalysisProps> = ({ caseId, caseName, oper
           <div className="max-w-7xl mx-auto space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
               {[
-                { label: 'Total Records', value: stats.totalRecords.toLocaleString(), icon: 'description', color: 'amber' },
-                { label: 'Unique ILD', value: stats.uniqueIld.toLocaleString(), icon: 'call', color: 'blue' },
+                { label: getMetricUiLabel('total_records', 'Total Records'), value: stats.totalRecords.toLocaleString(), icon: 'description', color: 'amber' },
+                { label: getMetricUiLabel('unique_ild', 'Unique ILD'), value: stats.uniqueIld.toLocaleString(), icon: 'call', color: 'blue' },
                 { label: 'Unique B-Parties', value: stats.uniqueBParty.toLocaleString(), icon: 'group', color: 'purple' },
-                { label: 'Total Duration', value: formatDuration(stats.totalDuration), icon: 'timer', color: 'orange' }
+                { label: getMetricUiLabel('total_duration', 'Total Duration'), value: formatDuration(stats.totalDuration), icon: 'timer', color: 'orange' }
               ].map((stat, i) => (
                 <div key={i} className="analysis-panel">
                   <div className="flex items-center gap-3 mb-2">

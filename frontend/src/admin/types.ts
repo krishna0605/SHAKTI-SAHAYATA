@@ -353,6 +353,84 @@ export interface AdminFilesResponse {
   }
 }
 
+export interface AdminMigrationCleanupItem {
+  id: string
+  entityType: string
+  entityId: string
+  caseId?: number | null
+  sourcePath?: string | null
+  classification: 'keep' | 'quarantine' | 'delete_later' | 'migrated' | 'skipped'
+  reason?: string | null
+  details: Record<string, unknown>
+  quarantineStatus?: 'pending' | 'quarantined'
+  quarantineRef?: string | null
+  deleteEligible: boolean
+  deletedAt?: string | null
+  migratedAt?: string | null
+  createdAt?: string | null
+  updatedAt?: string | null
+}
+
+export interface AdminMigrationCleanupReportResponse {
+  reportId: string | null
+  status: string
+  createdAt?: string | null
+  completedAt?: string | null
+  summary: Record<string, number | Record<string, number>>
+  totalsByType?: Record<string, number>
+  items: AdminMigrationCleanupItem[]
+}
+
+export interface AdminOfficerRosterImportError {
+  rowNumber: number
+  buckleId?: string
+  code: string
+  message: string
+}
+
+export interface AdminOfficerRosterImportResult {
+  importId: number | null
+  createdAt?: string | null
+  fileName: string
+  totalRows: number
+  inserted: number
+  updated: number
+  deactivated: number
+  skipped: number
+  invalid: number
+  duplicateBuckleCount: number
+  missingBuckleCount: number
+  fullSync: boolean
+  errors: AdminOfficerRosterImportError[]
+  message: string
+}
+
+export interface AdminOfficerRosterImportHistoryItem {
+  id: number
+  originalFilename: string
+  totalRows: number
+  inserted: number
+  updated: number
+  deactivated: number
+  skipped: number
+  invalid: number
+  duplicateBuckleCount: number
+  missingBuckleCount: number
+  errorCount: number
+  importMode: 'merge' | 'full_sync'
+  status: string
+  importedByAdminAccountId?: number | null
+  importedByAdminEmail?: string | null
+  importedByAdminName?: string | null
+  createdAt: string
+  errors: AdminOfficerRosterImportError[]
+}
+
+export interface AdminOfficerRosterImportsResponse {
+  imports: AdminOfficerRosterImportHistoryItem[]
+  total: number
+}
+
 export interface ObservatoryCasesSummary {
   totalCases: number
   lockedCases: number

@@ -4,6 +4,7 @@ import pool from '../config/database.js';
 import { authenticateToken } from '../middleware/auth.js';
 import { combineDateAndTime, normalizeDateString, normalizeTimeString } from '../utils/timestamps.js';
 import { emitAdminConsoleEvent } from '../services/admin/adminEventStream.service.js';
+import { invalidateCaseMemorySnapshots } from '../services/chatbot/caseMemorySnapshot.service.js';
 
 const router = Router();
 
@@ -163,6 +164,7 @@ router.post('/records', authenticateToken, async (req, res) => {
       inserted += batch.length;
     }
     await updateUploadedFileProgress(fileId, inserted);
+    await invalidateCaseMemorySnapshots({ caseId: parsedCaseId, module: 'cdr' });
     emitIngestionCompletionEvents({ caseId: parsedCaseId, fileId: toInt(fileId), inserted, module: 'cdr' });
     res.json({ inserted });
   } catch (error) {
