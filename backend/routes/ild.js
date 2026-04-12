@@ -5,9 +5,9 @@ import { authenticateToken } from '../middleware/auth.js';
 import { combineDateAndTime, normalizeDateString, normalizeTimeString } from '../utils/timestamps.js';
 import { emitAdminConsoleEvent } from '../services/admin/adminEventStream.service.js';
 import { invalidateCaseMemorySnapshots } from '../services/chatbot/caseMemorySnapshot.service.js';
+import { asText, buildPaginationPayload, parsePaginationParams, toInt } from '../utils/analysisRouteUtils.js';
 
 const router = Router();
-const toInt = (v) => { const n = Number(v); return Number.isFinite(n) ? Math.trunc(n) : null; };
 const normalizeRawData = (value) => (value && typeof value === 'object' && !Array.isArray(value) ? value : {});
 const updateUploadedFileProgress = async (fileId, inserted) => {
   const parsedFileId = toInt(fileId);
@@ -45,16 +45,224 @@ const buildIldResponseRow = (row) => {
   };
 };
 
-/* GET /api/ild/records?caseId=... */
-router.get('/records', authenticateToken, async (req, res) => {
+const buildIldWhereClause = (query = {}) => {
+  const caseId = toInt(query.caseId);
+  const search = asText(query.search || query.q);
+  const callType = asText(query.callType);
+  const direction = asText(query.direction);
+  const dateFrom = asText(query.dateFrom);
+  const dateTo = asText(query.dateTo);
+  const durationMin = toInt(query.durationMin);
+  const durationMax = toInt(query.durationMax);
+  const params = [];
+  const clauses = [];
+
+  if (!caseId) {
+    return { error: 'caseId is required' };
+  }
+
+  params.push(caseId);
+  clauses.push(`case_id = $${params.length}`);
+
+  if (search) {
+    params.push(`%${search}%`);
+    const searchIndex = params.length;
+    clauses.push(`(
+      COALESCE(calling_party, '') ILIKE $${searchIndex}
+      OR COALESCE(called_party, '') ILIKE $${searchIndex}
+      OR COALESCE(destination_country, '') ILIKE $${searchIndex}
+      OR COALESCE(operator, '') ILIKE $${searchIndex}
+      OR COALESCE(cell_id, '') ILIKE $${searchIndex}
+    )`);
+  }
+
+  if (callType) {
+    params.push(callType);
+    clauses.push(`LOWER(COALESCE(call_type, '')) LIKE LOWER($${params.length})`);
+    params[params.length - 1] = `%${callType}%`;
+  }
+
+  if (direction) {
+    params.push(`%${direction}%`);
+    clauses.push(`(
+      LOWER(COALESCE(call_direction, '')) LIKE LOWER($${params.length})
+      OR LOWER(COALESCE(call_type, '')) LIKE LOWER($${params.length})
+    )`);
+  }
+
+  if (dateFrom) {
+    params.push(dateFrom);
+    clauses.push(`call_date >= $${params.length}`);
+  }
+
+  if (dateTo) {
+    params.push(dateTo);
+    clauses.push(`call_date <= $${params.length}`);
+  }
+
+  if (durationMin !== null) {
+    params.push(durationMin);
+    clauses.push(`COALESCE(duration_sec, 0) >= $${params.length}`);
+  }
+
+  if (durationMax !== null) {
+    params.push(durationMax);
+    clauses.push(`COALESCE(duration_sec, 0) <= $${params.length}`);
+  }
+
+  return {
+    caseId,
+    params,
+    whereClause: clauses.join(' AND '),
+  };
+};
+
+const loadIldSummary = async (caseId) => {
+  const [totalsResult, directionResult, countryResult, topContactsResult, dailyResult] = await Promise.all([
+    pool.query(
+      `SELECT
+         COUNT(*)::int AS total_records,
+         COUNT(DISTINCT calling_party)::int AS unique_calling_numbers,
+         COUNT(DISTINCT called_party)::int AS unique_called_numbers,
+         COALESCE(SUM(duration_sec), 0)::bigint AS total_duration_sec
+       FROM ild_records
+       WHERE case_id = $1`,
+      [caseId]
+    ),
+    pool.query(
+      `SELECT COALESCE(call_direction, 'UNKNOWN') AS label, COUNT(*)::int AS value
+       FROM ild_records
+       WHERE case_id = $1
+       GROUP BY COALESCE(call_direction, 'UNKNOWN')
+       ORDER BY value DESC, label ASC`,
+      [caseId]
+    ),
+    pool.query(
+      `SELECT COALESCE(destination_country, 'UNKNOWN') AS label, COUNT(*)::int AS value
+       FROM ild_records
+       WHERE case_id = $1
+       GROUP BY COALESCE(destination_country, 'UNKNOWN')
+       ORDER BY value DESC, label ASC
+       LIMIT 8`,
+      [caseId]
+    ),
+    pool.query(
+      `SELECT COALESCE(called_party, 'UNKNOWN') AS label, COUNT(*)::int AS value
+       FROM ild_records
+       WHERE case_id = $1 AND COALESCE(called_party, '') <> ''
+       GROUP BY COALESCE(called_party, 'UNKNOWN')
+       ORDER BY value DESC, label ASC
+       LIMIT 8`,
+      [caseId]
+    ),
+    pool.query(
+      `SELECT COALESCE(call_date, 'UNKNOWN') AS label, COUNT(*)::int AS value
+       FROM ild_records
+       WHERE case_id = $1
+       GROUP BY COALESCE(call_date, 'UNKNOWN')
+       ORDER BY label ASC
+       LIMIT 14`,
+      [caseId]
+    ),
+  ]);
+
+  const totals = totalsResult.rows[0] || {};
+  return {
+    totalRecords: Number(totals.total_records || 0),
+    uniqueCallingNumbers: Number(totals.unique_calling_numbers || 0),
+    uniqueCalledNumbers: Number(totals.unique_called_numbers || 0),
+    totalDurationSec: Number(totals.total_duration_sec || 0),
+    directionBreakdown: directionResult.rows,
+    topCountries: countryResult.rows,
+    topContacts: topContactsResult.rows,
+    dailyActivity: dailyResult.rows,
+  };
+};
+
+router.get('/summary', authenticateToken, async (req, res) => {
   const caseId = toInt(req.query.caseId);
   if (!caseId) return res.status(400).json({ error: 'caseId is required' });
+
   try {
-    const result = await pool.query(
-      'SELECT * FROM ild_records WHERE case_id = $1 ORDER BY created_at DESC, id DESC',
-      [caseId]
+    const summary = await loadIldSummary(caseId);
+    res.json(summary);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.get('/filters', authenticateToken, async (req, res) => {
+  const caseId = toInt(req.query.caseId);
+  if (!caseId) return res.status(400).json({ error: 'caseId is required' });
+
+  try {
+    const [callTypesResult, directionsResult] = await Promise.all([
+      pool.query(
+        `SELECT DISTINCT COALESCE(call_type, 'UNKNOWN') AS value
+         FROM ild_records
+         WHERE case_id = $1
+         ORDER BY value ASC`,
+        [caseId]
+      ),
+      pool.query(
+        `SELECT DISTINCT COALESCE(call_direction, 'UNKNOWN') AS value
+         FROM ild_records
+         WHERE case_id = $1
+         ORDER BY value ASC`,
+        [caseId]
+      ),
+    ]);
+
+    res.json({
+      callTypes: callTypesResult.rows
+        .map((row) => row.value)
+        .filter((value) => typeof value === 'string' && value.trim() !== ''),
+      directions: directionsResult.rows
+        .map((row) => row.value)
+        .filter((value) => typeof value === 'string' && value.trim() !== ''),
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/* GET /api/ild/records?caseId=... */
+router.get('/records', authenticateToken, async (req, res) => {
+  const scope = buildIldWhereClause(req.query);
+  if (scope.error) return res.status(400).json({ error: scope.error });
+  const pagination = parsePaginationParams(req.query);
+  try {
+    if (!pagination.paginated) {
+      const result = await pool.query(
+        `SELECT * FROM ild_records
+         WHERE ${scope.whereClause}
+         ORDER BY created_at DESC, id DESC`,
+        scope.params
+      );
+      return res.json(result.rows.map(buildIldResponseRow));
+    }
+
+    const countResult = await pool.query(
+      `SELECT COUNT(*)::int AS total FROM ild_records WHERE ${scope.whereClause}`,
+      scope.params
     );
-    res.json(result.rows.map(buildIldResponseRow));
+    const rowsResult = await pool.query(
+      `SELECT * FROM ild_records
+       WHERE ${scope.whereClause}
+       ORDER BY created_at DESC, id DESC
+       LIMIT $${scope.params.length + 1}
+       OFFSET $${scope.params.length + 2}`,
+      [...scope.params, pagination.pageSize, pagination.offset]
+    );
+
+    res.json({
+      data: rowsResult.rows.map(buildIldResponseRow),
+      pagination: buildPaginationPayload({
+        page: pagination.page,
+        pageSize: pagination.pageSize,
+        total: countResult.rows[0]?.total || 0,
+      }),
+    });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

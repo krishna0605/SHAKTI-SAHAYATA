@@ -19,14 +19,15 @@ import {
 } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
-import { ingestCaseUploads, type CaseUploadFailure, type CaseUploadSlotKey } from '../lib/caseFileIngestion'
+import type { CaseUploadSlotKey } from '../lib/caseFileIngestion'
+import { startCaseIngestionRun } from '../lib/caseIngestionRunner'
+import { markPerformanceEvent, startPerformanceSpan } from '@/lib/performance'
 
 const loadingStates = [
   { text: 'Initializing Workspace...' },
   { text: 'Securing Credentials...' },
-  { text: 'Linking Operator Configs...' },
   { text: 'Minting Case ID...' },
-  { text: 'Finalizing...' },
+  { text: 'Preparing Workspace...' },
 ]
 
 const OPERATORS = ['Jio', 'Airtel', 'Vi (Vodafone Idea)', 'BSNL', 'MTNL', 'Other']
@@ -91,7 +92,6 @@ export default function CreateCasePage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [fieldErrors, setFieldErrors] = useState<FormErrors>({})
-  const [uploadProgress, setUploadProgress] = useState<Record<string, string>>({})
 
   const fileInputRefs = useRef<Record<string, HTMLInputElement | null>>({})
 
@@ -173,16 +173,6 @@ export default function CreateCasePage() {
 
   const getTotalFileCount = () => uploads.reduce((sum, upload) => sum + upload.files.length, 0)
 
-  const uploadFilesToCase = async (caseId: number): Promise<CaseUploadFailure[]> =>
-    ingestCaseUploads({
-      caseId,
-      operator,
-      uploads,
-      onProgress: (slotKey, message) => {
-        setUploadProgress((prev) => ({ ...prev, [slotKey]: message }))
-      },
-    })
-
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault()
 
@@ -196,9 +186,14 @@ export default function CreateCasePage() {
     setLoading(true)
     setError('')
     setFieldErrors({})
-    setUploadProgress({})
+    const finishCreateSpan = startPerformanceSpan('case-create.submit', {
+      uploadCount: getTotalFileCount(),
+    })
 
     try {
+      markPerformanceEvent('case-create.route-entered', {
+        uploadCount: getTotalFileCount(),
+      })
       const newCase = await caseAPI.create({
         caseName,
         caseNumber,
@@ -212,25 +207,42 @@ export default function CreateCasePage() {
       })
       const caseId = newCase.id || newCase.case?.id
 
-      let uploadFailures: CaseUploadFailure[] = []
-      if (getTotalFileCount() > 0 && caseId) {
-        uploadFailures = await uploadFilesToCase(caseId)
-        uploadFailures.forEach((failure) => {
-          console.error(`Upload error for ${failure.fileName}:`, failure.message)
-          toast.error(failure.message)
-        })
+      if (!caseId) {
+        throw new Error('Case was created, but no case id was returned.')
       }
 
-      if (uploadFailures.length > 0) {
-        toast.warning(`Case created with ${uploadFailures.length} upload issue${uploadFailures.length > 1 ? 's' : ''}. Review the upload messages.`)
+      markPerformanceEvent('case-create.case-row-created', {
+        caseId,
+        caseNumber,
+      })
+
+      const totalFiles = getTotalFileCount()
+
+      navigate(`/case/${caseId}`)
+      markPerformanceEvent('case-create.workspace-handoff', {
+        caseId,
+        totalFiles,
+      })
+
+      if (totalFiles > 0) {
+        toast.success(`Case created. ${totalFiles} file${totalFiles === 1 ? '' : 's'} ${totalFiles === 1 ? 'is' : 'are'} now processing in the workspace.`)
+        void startCaseIngestionRun({
+          caseId,
+          operator,
+          uploads,
+        }).catch((backgroundError) => {
+          const message = backgroundError instanceof Error ? backgroundError.message : 'Background file processing failed'
+          toast.error(message)
+        })
       } else {
         toast.success('Case created successfully')
       }
-      navigate(`/case/${caseId}`)
+      finishCreateSpan({ status: 'completed', caseId, totalFiles })
     } catch (submitError: any) {
       const message = submitError.message || 'Failed to create case'
       setError(message)
       toast.error(message)
+      finishCreateSpan({ status: 'failed', error: message })
     } finally {
       setLoading(false)
     }
@@ -544,9 +556,9 @@ export default function CreateCasePage() {
                               </div>
                             ) : null}
 
-                            {uploadProgress[slot.key] ? (
+                            {slot.files.length > 0 ? (
                               <p className="mt-3 text-xs font-medium text-shakti-600 dark:text-shakti-300">
-                                {uploadProgress[slot.key]}
+                                Processing continues in the case workspace after creation.
                               </p>
                             ) : null}
                           </div>

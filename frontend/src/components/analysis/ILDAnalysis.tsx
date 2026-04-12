@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { startTransition, useCallback, useEffect, useMemo, useState } from 'react';
 import { ResponsiveContainer, LineChart, Line, CartesianGrid, XAxis, YAxis, Tooltip, BarChart, Bar, PieChart, Pie, Cell, Legend } from 'recharts';
 import { MapContainer, TileLayer, CircleMarker, Popup, useMap } from 'react-leaflet';
 import L from 'leaflet';
@@ -7,10 +7,12 @@ import * as XLSX from 'xlsx-js-style';
 import { encodeSpreadsheetRows } from '../lib/security';
 import { RecordTable } from './RecordTable';
 import { AnalysisTabBar } from './AnalysisTabBar';
+import { usePaginatedAnalysisRecords } from './usePaginatedAnalysisRecords';
 import { type NormalizedILD } from '../utils/ildNormalization';
 import { ildAPI } from '../lib/apis';
 import { useChatbotWorkspaceStore } from '../../stores/chatbotWorkspaceStore';
 import { getMetricUiLabel } from '../../lib/caseQaCatalog';
+import { markPerformanceEvent, trackPerformanceAsync } from '../../lib/performance';
 
 interface ILDAnalysisProps {
   caseId?: string;
@@ -479,6 +481,12 @@ export const ILDAnalysis: React.FC<ILDAnalysisProps> = ({ caseId, caseName, oper
   const clearWorkspaceContext = useChatbotWorkspaceStore((state) => state.clearWorkspaceContext);
   const [data, setData] = useState<NormalizedILD[]>(parsedData || []);
   const [isLoading, setIsLoading] = useState(!parsedData || parsedData.length === 0);
+  const [summary, setSummary] = useState<{
+    totalRecords?: number;
+    uniqueCallingNumbers?: number;
+    uniqueCalledNumbers?: number;
+    totalDurationSec?: number;
+  } | null>(null);
   const [selectedTab, setSelectedTab] = useState<TabId>('overview');
   const [currentTime, setCurrentTime] = useState(new Date());
   const [isExporting, setIsExporting] = useState(false);
@@ -493,6 +501,18 @@ export const ILDAnalysis: React.FC<ILDAnalysisProps> = ({ caseId, caseName, oper
   const [durationMaxFilter, setDurationMaxFilter] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage] = useState(50);
+  const [filterOptions, setFilterOptions] = useState<{ callTypes: string[]; directions: string[] }>({
+    callTypes: [],
+    directions: []
+  });
+
+  useEffect(() => {
+    markPerformanceEvent('ild.route-entered', { caseId: caseId || null });
+  }, [caseId]);
+
+  useEffect(() => {
+    markPerformanceEvent('ild.shell-rendered', { caseId: caseId || null });
+  }, [caseId]);
 
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
@@ -524,13 +544,43 @@ export const ILDAnalysis: React.FC<ILDAnalysisProps> = ({ caseId, caseName, oper
         carrier: record.carrier || '',
         operator_name: record.operator_name || ''
       }));
-      setData(parsed);
+      startTransition(() => {
+        setData(parsed);
+      });
     } catch (error) {
       console.error('Failed to load ILD records:', error);
     } finally {
       setIsLoading(false);
     }
   }, [caseId, operator]);
+
+  const loadCaseSummary = useCallback(async () => {
+    if (!caseId) return;
+    try {
+      const nextSummary = await trackPerformanceAsync(
+        'ild.summary.load',
+        () => ildAPI.getSummary(caseId),
+        { caseId }
+      );
+      setSummary((nextSummary && typeof nextSummary === 'object') ? nextSummary as typeof summary : null);
+    } catch (error) {
+      console.error('Failed to load ILD summary:', error);
+    }
+  }, [caseId]);
+
+  const loadRecordFilters = useCallback(async () => {
+    if (!caseId) return;
+    try {
+      const nextFilters = await ildAPI.getFilters(caseId) as { callTypes?: string[]; directions?: string[] };
+      setFilterOptions({
+        callTypes: Array.isArray(nextFilters?.callTypes) ? nextFilters.callTypes : [],
+        directions: Array.isArray(nextFilters?.directions) ? nextFilters.directions : []
+      });
+    } catch (error) {
+      console.error('Failed to load ILD filters:', error);
+      setFilterOptions({ callTypes: [], directions: [] });
+    }
+  }, [caseId]);
 
   useEffect(() => {
     if (parsedData && parsedData.length > 0) {
@@ -542,6 +592,32 @@ export const ILDAnalysis: React.FC<ILDAnalysisProps> = ({ caseId, caseName, oper
       setIsLoading(false);
     }
   }, [caseId, parsedData, loadCaseData]);
+
+  useEffect(() => {
+    if (!caseId) {
+      setSummary(null);
+      setFilterOptions({ callTypes: [], directions: [] });
+      return;
+    }
+    loadCaseSummary();
+    loadRecordFilters();
+  }, [caseId, loadCaseSummary, loadRecordFilters]);
+
+  useEffect(() => {
+    if (summary) {
+      markPerformanceEvent('ild.summary.loaded', {
+        caseId: caseId || null,
+        totalRecords: Number(summary.totalRecords || 0)
+      });
+    }
+  }, [caseId, summary]);
+
+  useEffect(() => {
+    markPerformanceEvent('ild.tab-opened', { caseId: caseId || null, tab: selectedTab });
+    if (selectedTab === 'advanced' || selectedTab === 'map' || selectedTab === 'charts') {
+      markPerformanceEvent('ild.heavy-tab-rendered', { caseId: caseId || null, tab: selectedTab });
+    }
+  }, [caseId, selectedTab]);
 
   const handleExportExcel = async () => {
     if (isExporting) return;
@@ -626,7 +702,7 @@ export const ILDAnalysis: React.FC<ILDAnalysisProps> = ({ caseId, caseName, oper
       searchState: selectedTab === 'records'
         ? {
             query: searchTerm || null,
-            resultCount: filteredRecords.length
+            resultCount: recordsResultCount
           }
         : null,
       selectionTimestamp: new Date().toISOString()
@@ -655,11 +731,51 @@ export const ILDAnalysis: React.FC<ILDAnalysisProps> = ({ caseId, caseName, oper
     setCurrentPage(1);
   }, [data, searchTerm, callTypeFilter, directionFilter, dateFromFilter, dateToFilter, durationMinFilter, durationMaxFilter]);
 
+  const recordsQueryKey = useMemo(
+    () => [searchTerm, callTypeFilter, directionFilter, dateFromFilter, dateToFilter, durationMinFilter, durationMaxFilter].join('|'),
+    [searchTerm, callTypeFilter, directionFilter, dateFromFilter, dateToFilter, durationMinFilter, durationMaxFilter]
+  );
+
+  const {
+    data: remoteRecords,
+    loading: recordsLoading,
+    error: recordsError,
+    pagination: recordsPagination,
+    totalPages: remoteTotalPages,
+    showingStart: remoteShowingStart,
+    showingEnd: remoteShowingEnd
+  } = usePaginatedAnalysisRecords<NormalizedILD>({
+    enabled: Boolean(caseId && selectedTab === 'records'),
+    moduleKey: 'ild',
+    page: currentPage,
+    pageSize: itemsPerPage,
+    fetchPage: async () => {
+      const response = await ildAPI.getRecordsPage(caseId!, {
+        page: currentPage,
+        pageSize: itemsPerPage,
+        search: searchTerm || undefined,
+        callType: callTypeFilter || undefined,
+        direction: directionFilter || undefined,
+        dateFrom: dateFromFilter || undefined,
+        dateTo: dateToFilter || undefined,
+        durationMin: durationMinFilter || undefined,
+        durationMax: durationMaxFilter || undefined,
+      });
+      return response as { data: NormalizedILD[]; pagination: { page: number; pageSize: number; total: number } };
+    },
+    deps: [recordsQueryKey]
+  });
+
   const totalPages = Math.max(1, Math.ceil(filteredRecords.length / itemsPerPage));
   const startIndex = (currentPage - 1) * itemsPerPage;
   const currentPageData = filteredRecords.slice(startIndex, startIndex + itemsPerPage);
   const showingStart = filteredRecords.length === 0 ? 0 : startIndex + 1;
   const showingEnd = Math.min(startIndex + itemsPerPage, filteredRecords.length);
+  const recordsRows = caseId ? remoteRecords : currentPageData;
+  const recordsTotalPages = caseId ? remoteTotalPages : totalPages;
+  const recordsShowingStart = caseId ? remoteShowingStart : showingStart;
+  const recordsShowingEnd = caseId ? remoteShowingEnd : showingEnd;
+  const recordsResultCount = caseId ? recordsPagination.total : filteredRecords.length;
 
   const stats = useMemo(() => {
     const totalRecords = data.length;
@@ -685,6 +801,17 @@ export const ILDAnalysis: React.FC<ILDAnalysisProps> = ({ caseId, caseName, oper
     });
     return { totalRecords, uniqueIld, uniqueBParty, totalDuration, uniqueCircles, incoming, outgoing, sms, other };
   }, [data]);
+
+  const overviewStats = useMemo(() => {
+    if (data.length > 0 || !summary) return stats;
+    return {
+      ...stats,
+      totalRecords: Number(summary.totalRecords || 0),
+      uniqueIld: Number(summary.uniqueCallingNumbers || 0),
+      uniqueBParty: Number(summary.uniqueCalledNumbers || 0),
+      totalDuration: Number(summary.totalDurationSec || 0),
+    };
+  }, [data.length, stats, summary]);
 
   const dailyActivityData = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -833,18 +960,20 @@ export const ILDAnalysis: React.FC<ILDAnalysisProps> = ({ caseId, caseName, oper
       )}
 
       <div className="analysis-content custom-scrollbar flex-1 overflow-y-auto p-6">
-        {isLoading && (
-          <div className="text-center text-slate-500 py-10">Loading ILD records...</div>
-        )}
+        {isLoading ? (
+          <div className="mb-6 rounded-2xl border border-amber-200 bg-amber-50/80 px-4 py-3 text-sm text-amber-700 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-200">
+            Loading ILD records in the background. The workspace stays interactive while the dataset finishes loading.
+          </div>
+        ) : null}
 
-        {!isLoading && selectedTab === 'overview' && (
+        {selectedTab === 'overview' && (
           <div className="max-w-7xl mx-auto space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
               {[
-                { label: getMetricUiLabel('total_records', 'Total Records'), value: stats.totalRecords.toLocaleString(), icon: 'description', color: 'amber' },
-                { label: getMetricUiLabel('unique_ild', 'Unique ILD'), value: stats.uniqueIld.toLocaleString(), icon: 'call', color: 'blue' },
-                { label: 'Unique B-Parties', value: stats.uniqueBParty.toLocaleString(), icon: 'group', color: 'purple' },
-                { label: getMetricUiLabel('total_duration', 'Total Duration'), value: formatDuration(stats.totalDuration), icon: 'timer', color: 'orange' }
+                { label: getMetricUiLabel('total_records', 'Total Records'), value: overviewStats.totalRecords.toLocaleString(), icon: 'description', color: 'amber' },
+                { label: getMetricUiLabel('unique_ild', 'Unique ILD'), value: overviewStats.uniqueIld.toLocaleString(), icon: 'call', color: 'blue' },
+                { label: 'Unique B-Parties', value: overviewStats.uniqueBParty.toLocaleString(), icon: 'group', color: 'purple' },
+                { label: getMetricUiLabel('total_duration', 'Total Duration'), value: formatDuration(overviewStats.totalDuration), icon: 'timer', color: 'orange' }
               ].map((stat, i) => (
                 <div key={i} className="analysis-panel">
                   <div className="flex items-center gap-3 mb-2">
@@ -923,12 +1052,22 @@ export const ILDAnalysis: React.FC<ILDAnalysisProps> = ({ caseId, caseName, oper
           </div>
         )}
 
-        {!isLoading && selectedTab === 'records' && (
+        {selectedTab === 'records' && (
           <div className="space-y-4">
             <div className="bg-white dark:bg-slate-800 p-4 rounded-lg border border-slate-200 dark:border-slate-700 grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4">
               <input value={searchTerm} onChange={e => setSearchTerm(e.target.value)} placeholder="Search ILD, B-Party, Cell, Circle" className="px-3 py-2 rounded bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-sm" />
-              <input value={callTypeFilter} onChange={e => setCallTypeFilter(e.target.value)} placeholder="Call Type" className="px-3 py-2 rounded bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-sm" />
-              <input value={directionFilter} onChange={e => setDirectionFilter(e.target.value)} placeholder="Direction" className="px-3 py-2 rounded bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-sm" />
+              <select value={callTypeFilter} onChange={e => setCallTypeFilter(e.target.value)} className="px-3 py-2 rounded bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-sm">
+                <option value="">All Call Types</option>
+                {filterOptions.callTypes.map(type => (
+                  <option key={type} value={type}>{type}</option>
+                ))}
+              </select>
+              <select value={directionFilter} onChange={e => setDirectionFilter(e.target.value)} className="px-3 py-2 rounded bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-sm">
+                <option value="">All Directions</option>
+                {filterOptions.directions.map(direction => (
+                  <option key={direction} value={direction}>{direction}</option>
+                ))}
+              </select>
               <input type="date" value={dateFromFilter} onChange={e => setDateFromFilter(e.target.value)} className="px-3 py-2 rounded bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-sm" />
               <input type="date" value={dateToFilter} onChange={e => setDateToFilter(e.target.value)} className="px-3 py-2 rounded bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-sm" />
               <div className="flex gap-2">
@@ -938,24 +1077,34 @@ export const ILDAnalysis: React.FC<ILDAnalysisProps> = ({ caseId, caseName, oper
             </div>
 
             <div className="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
+              {recordsError ? (
+                <div className="border-b border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-500/20 dark:bg-rose-500/10 dark:text-rose-200">
+                  {recordsError}
+                </div>
+              ) : null}
+              {recordsLoading ? (
+                <div className="border-b border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-200">
+                  Loading ILD records...
+                </div>
+              ) : null}
               <div className="max-h-[600px] overflow-y-auto">
-                <RecordTable rows={currentPageData as unknown as Record<string, unknown>[]} maxRows={50} />
+                <RecordTable rows={recordsRows as unknown as Record<string, unknown>[]} maxRows={50} />
               </div>
               <div className="p-4 border-t border-slate-200 dark:border-slate-700 flex items-center justify-between">
                 <span className="text-sm text-slate-500">
-                  Showing {showingStart}-{showingEnd} of {filteredRecords.length}
+                  Showing {recordsShowingStart}-{recordsShowingEnd} of {recordsResultCount}
                 </span>
                 <div className="flex gap-2">
                   <button disabled={currentPage === 1} onClick={() => setCurrentPage(Math.max(1, currentPage - 1))} className="px-3 py-1 bg-slate-100 dark:bg-slate-700 rounded disabled:opacity-50">Prev</button>
-                  <span className="px-3 py-1">{currentPage} / {totalPages}</span>
-                  <button disabled={currentPage === totalPages} onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))} className="px-3 py-1 bg-slate-100 dark:bg-slate-700 rounded disabled:opacity-50">Next</button>
+                  <span className="px-3 py-1">{currentPage} / {recordsTotalPages}</span>
+                  <button disabled={currentPage === recordsTotalPages} onClick={() => setCurrentPage(Math.min(recordsTotalPages, currentPage + 1))} className="px-3 py-1 bg-slate-100 dark:bg-slate-700 rounded disabled:opacity-50">Next</button>
                 </div>
               </div>
             </div>
           </div>
         )}
 
-        {!isLoading && selectedTab === 'advanced' && (
+        {selectedTab === 'advanced' && (
           <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-6">
             <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-6">
               <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-4">Max Direction</h3>
@@ -1043,7 +1192,7 @@ export const ILDAnalysis: React.FC<ILDAnalysisProps> = ({ caseId, caseName, oper
           </div>
         )}
 
-        {!isLoading && selectedTab === 'map' && (
+        {selectedTab === 'map' && (
           <div className="max-w-7xl mx-auto space-y-4">
             <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-4">
               <h3 className="text-lg font-bold text-slate-900 dark:text-white">ILD Map View</h3>
@@ -1094,7 +1243,7 @@ export const ILDAnalysis: React.FC<ILDAnalysisProps> = ({ caseId, caseName, oper
             </div>
           </div>
         )}
-        {!isLoading && selectedTab === 'charts' && (
+        {selectedTab === 'charts' && (
           <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-6">
             <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-6 h-80">
               <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-4">Daily Activity</h3>

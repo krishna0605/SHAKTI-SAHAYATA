@@ -5,13 +5,9 @@ import { authenticateToken } from '../middleware/auth.js';
 import { combineDateAndTime, normalizeDateString, normalizeTimeString } from '../utils/timestamps.js';
 import { emitAdminConsoleEvent } from '../services/admin/adminEventStream.service.js';
 import { invalidateCaseMemorySnapshots } from '../services/chatbot/caseMemorySnapshot.service.js';
+import { asText, buildPaginationPayload, parseCsvIntList, parsePaginationParams, toInt } from '../utils/analysisRouteUtils.js';
 
 const router = Router();
-
-const toInt = (value) => {
-  const num = Number(value);
-  return Number.isFinite(num) ? Math.trunc(num) : null;
-};
 
 const updateUploadedFileProgress = async (fileId, inserted) => {
   const parsedFileId = toInt(fileId);
@@ -61,18 +57,218 @@ const buildCdrResponseRow = (row) => {
   };
 };
 
+const buildCdrWhereClause = (query = {}) => {
+  const caseId = toInt(query.caseId);
+  const search = asText(query.search || query.q);
+  const callType = asText(query.callType);
+  const dateFrom = asText(query.dateFrom);
+  const dateTo = asText(query.dateTo);
+  const durationMin = toInt(query.durationMin);
+  const durationMax = toInt(query.durationMax);
+  const fileIds = parseCsvIntList(query.fileIds);
+  const params = [];
+  const clauses = [];
+
+  if (!caseId) {
+    return { error: 'caseId is required' };
+  }
+
+  params.push(caseId);
+  clauses.push(`case_id = $${params.length}`);
+
+  if (search) {
+    params.push(`%${search}%`);
+    const searchIndex = params.length;
+    clauses.push(`(
+      COALESCE(calling_number, '') ILIKE $${searchIndex}
+      OR COALESCE(called_number, '') ILIKE $${searchIndex}
+      OR COALESCE(call_type, '') ILIKE $${searchIndex}
+      OR COALESCE(imei_a, '') ILIKE $${searchIndex}
+      OR COALESCE(imei_b, '') ILIKE $${searchIndex}
+      OR COALESCE(first_cell_id, '') ILIKE $${searchIndex}
+      OR COALESCE(last_cell_id, '') ILIKE $${searchIndex}
+    )`);
+  }
+
+  if (callType) {
+    params.push(callType);
+    clauses.push(`LOWER(COALESCE(call_type, '')) = LOWER($${params.length})`);
+  }
+
+  if (dateFrom) {
+    params.push(dateFrom);
+    clauses.push(`call_date >= $${params.length}`);
+  }
+
+  if (dateTo) {
+    params.push(dateTo);
+    clauses.push(`call_date <= $${params.length}`);
+  }
+
+  if (durationMin !== null) {
+    params.push(durationMin);
+    clauses.push(`COALESCE(duration_sec, 0) >= $${params.length}`);
+  }
+
+  if (durationMax !== null) {
+    params.push(durationMax);
+    clauses.push(`COALESCE(duration_sec, 0) <= $${params.length}`);
+  }
+
+  if (fileIds.length > 0) {
+    params.push(fileIds);
+    clauses.push(`file_id = ANY($${params.length}::int[])`);
+  }
+
+  return {
+    caseId,
+    params,
+    whereClause: clauses.join(' AND '),
+  };
+};
+
+const loadCdrSummary = async (caseId) => {
+  const [totalsResult, callTypeResult, topContactsResult, hourlyResult, topCellsResult] = await Promise.all([
+    pool.query(
+      `SELECT
+         COUNT(*)::int AS total_records,
+         COUNT(DISTINCT calling_number)::int AS unique_a_parties,
+         COUNT(DISTINCT called_number)::int AS unique_b_parties,
+         COALESCE(SUM(duration_sec), 0)::bigint AS total_duration_sec
+       FROM cdr_records
+       WHERE case_id = $1`,
+      [caseId]
+    ),
+    pool.query(
+      `SELECT COALESCE(call_type, 'UNKNOWN') AS label, COUNT(*)::int AS value
+       FROM cdr_records
+       WHERE case_id = $1
+       GROUP BY COALESCE(call_type, 'UNKNOWN')
+       ORDER BY value DESC, label ASC
+       LIMIT 8`,
+      [caseId]
+    ),
+    pool.query(
+      `SELECT COALESCE(called_number, 'UNKNOWN') AS label, COUNT(*)::int AS value
+       FROM cdr_records
+       WHERE case_id = $1 AND COALESCE(called_number, '') <> ''
+       GROUP BY COALESCE(called_number, 'UNKNOWN')
+       ORDER BY value DESC, label ASC
+       LIMIT 8`,
+      [caseId]
+    ),
+    pool.query(
+      `SELECT
+         LPAD(COALESCE(EXTRACT(HOUR FROM date_time)::int, 0)::text, 2, '0') AS label,
+         COUNT(*)::int AS value
+       FROM cdr_records
+       WHERE case_id = $1
+       GROUP BY LPAD(COALESCE(EXTRACT(HOUR FROM date_time)::int, 0)::text, 2, '0')
+       ORDER BY label ASC`,
+      [caseId]
+    ),
+    pool.query(
+      `SELECT COALESCE(first_cell_id, 'UNKNOWN') AS label, COUNT(*)::int AS value
+       FROM cdr_records
+       WHERE case_id = $1 AND COALESCE(first_cell_id, '') <> ''
+       GROUP BY COALESCE(first_cell_id, 'UNKNOWN')
+       ORDER BY value DESC, label ASC
+       LIMIT 8`,
+      [caseId]
+    ),
+  ]);
+
+  const totals = totalsResult.rows[0] || {};
+  return {
+    totalRecords: Number(totals.total_records || 0),
+    uniqueAParties: Number(totals.unique_a_parties || 0),
+    uniqueBParties: Number(totals.unique_b_parties || 0),
+    totalDurationSec: Number(totals.total_duration_sec || 0),
+    callTypes: callTypeResult.rows,
+    topContacts: topContactsResult.rows,
+    hourlyActivity: hourlyResult.rows,
+    topCells: topCellsResult.rows,
+  };
+};
+
+router.get('/summary', authenticateToken, async (req, res) => {
+  const caseId = toInt(req.query.caseId);
+  if (!caseId) return res.status(400).json({ error: 'caseId is required' });
+
+  try {
+    const summary = await loadCdrSummary(caseId);
+    res.json(summary);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.get('/filters', authenticateToken, async (req, res) => {
+  const caseId = toInt(req.query.caseId);
+  if (!caseId) return res.status(400).json({ error: 'caseId is required' });
+
+  try {
+    const [callTypesResult] = await Promise.all([
+      pool.query(
+        `SELECT DISTINCT COALESCE(call_type, 'UNKNOWN') AS value
+         FROM cdr_records
+         WHERE case_id = $1
+         ORDER BY value ASC`,
+        [caseId]
+      ),
+    ]);
+
+    res.json({
+      callTypes: callTypesResult.rows
+        .map((row) => row.value)
+        .filter((value) => typeof value === 'string' && value.trim() !== ''),
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 /* GET /api/cdr/records?caseId=...
    Returns columns aliased for backward compat with frontend analysis components */
 router.get('/records', authenticateToken, async (req, res) => {
-  const caseId = toInt(req.query.caseId);
-  if (!caseId) return res.status(400).json({ error: 'caseId is required' });
+  const scope = buildCdrWhereClause(req.query);
+  if (scope.error) return res.status(400).json({ error: scope.error });
+
+  const pagination = parsePaginationParams(req.query);
   try {
-    const result = await pool.query(
-      `SELECT *, calling_number AS a_party, called_number AS b_party
-       FROM cdr_records WHERE case_id = $1 ORDER BY created_at DESC, id DESC`,
-      [caseId]
+    if (!pagination.paginated) {
+      const result = await pool.query(
+        `SELECT *, calling_number AS a_party, called_number AS b_party
+         FROM cdr_records
+         WHERE ${scope.whereClause}
+         ORDER BY created_at DESC, id DESC`,
+        scope.params
+      );
+      return res.json(result.rows.map(buildCdrResponseRow));
+    }
+
+    const countResult = await pool.query(
+      `SELECT COUNT(*)::int AS total FROM cdr_records WHERE ${scope.whereClause}`,
+      scope.params
     );
-    res.json(result.rows.map(buildCdrResponseRow));
+    const rowsResult = await pool.query(
+      `SELECT *, calling_number AS a_party, called_number AS b_party
+       FROM cdr_records
+       WHERE ${scope.whereClause}
+       ORDER BY created_at DESC, id DESC
+       LIMIT $${scope.params.length + 1}
+       OFFSET $${scope.params.length + 2}`,
+      [...scope.params, pagination.pageSize, pagination.offset]
+    );
+
+    res.json({
+      data: rowsResult.rows.map(buildCdrResponseRow),
+      pagination: buildPaginationPayload({
+        page: pagination.page,
+        pageSize: pagination.pageSize,
+        total: countResult.rows[0]?.total || 0,
+      }),
+    });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

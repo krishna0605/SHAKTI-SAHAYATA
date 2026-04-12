@@ -5,10 +5,9 @@ import { upload, handleUploadError } from '../middleware/upload.js';
 import XLSX from 'xlsx';
 import { emitAdminConsoleEvent } from '../services/admin/adminEventStream.service.js';
 import { invalidateCaseMemorySnapshots } from '../services/chatbot/caseMemorySnapshot.service.js';
+import { buildPaginationPayload, parsePaginationParams, toInt } from '../utils/analysisRouteUtils.js';
 
 const router = Router();
-
-const toInt = (v) => { const n = Number(v); return Number.isFinite(n) ? Math.trunc(n) : null; };
 const DEFAULT_TABLE_NAME = 'subscriber_data';
 
 const ensureScopedAccess = async ({ caseId, userId, role }) => {
@@ -112,6 +111,81 @@ const rowsToSheetData = (rows) => rows.map((row) => ({
   created_at: row.created_at,
   data: row.data || row.raw_data || null
 }));
+
+router.get('/summary', authenticateToken, async (req, res) => {
+  const caseId = toInt(req.query.caseId);
+
+  try {
+    if (caseId) {
+      const hasAccess = await ensureScopedAccess({ caseId, userId: req.user.userId, role: req.user.role });
+      if (!hasAccess) return res.status(403).json({ error: 'No access to this case' });
+    }
+
+    const scope = buildScopeFilter(caseId);
+    const [totalsResult, operatorResult] = await Promise.all([
+      pool.query(
+        `SELECT
+           COUNT(*)::int AS total_records,
+           COUNT(DISTINCT msisdn)::int AS unique_msisdn,
+           COUNT(DISTINCT subscriber_name)::int AS unique_subscribers,
+           COUNT(DISTINCT imei)::int AS unique_imei
+         FROM sdr_records
+         WHERE ${scope.clause}`,
+        scope.params
+      ),
+      pool.query(
+        `SELECT COALESCE(operator, 'UNKNOWN') AS label, COUNT(*)::int AS value
+         FROM sdr_records
+         WHERE ${scope.clause}
+         GROUP BY COALESCE(operator, 'UNKNOWN')
+         ORDER BY value DESC, label ASC
+         LIMIT 8`,
+        scope.params
+      ),
+    ]);
+
+    const totals = totalsResult.rows[0] || {};
+    res.json({
+      totalRecords: Number(totals.total_records || 0),
+      uniqueMsisdn: Number(totals.unique_msisdn || 0),
+      uniqueSubscribers: Number(totals.unique_subscribers || 0),
+      uniqueImei: Number(totals.unique_imei || 0),
+      operatorBreakdown: operatorResult.rows,
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.get('/filters', authenticateToken, async (req, res) => {
+  const caseId = toInt(req.query.caseId);
+
+  try {
+    if (caseId) {
+      const hasAccess = await ensureScopedAccess({ caseId, userId: req.user.userId, role: req.user.role });
+      if (!hasAccess) return res.status(403).json({ error: 'No access to this case' });
+    }
+
+    const scope = buildScopeFilter(caseId);
+    const [operatorsResult] = await Promise.all([
+      pool.query(
+        `SELECT COALESCE(operator, 'UNKNOWN') AS value, COUNT(*)::int AS count
+         FROM sdr_records
+         WHERE ${scope.clause}
+         GROUP BY COALESCE(operator, 'UNKNOWN')
+         ORDER BY count DESC, value ASC
+         LIMIT 12`,
+        scope.params
+      ),
+    ]);
+
+    res.json({
+      operators: operatorsResult.rows,
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
 
 /* GET /api/sdr/records?caseId=... */
 router.get('/records', authenticateToken, async (req, res) => {
@@ -344,6 +418,7 @@ router.get('/search', authenticateToken, async (req, res) => {
   const caseId = toInt(req.query.caseId);
   const q = String(req.query.q || req.query.query || '').trim();
   const field = String(req.query.field || '').trim();
+  const pagination = parsePaginationParams(req.query);
 
   if (!q) return res.status(400).json({ error: 'query is required' });
 
@@ -375,12 +450,35 @@ router.get('/search', authenticateToken, async (req, res) => {
         )`);
     }
 
-    const result = await pool.query(
-      `SELECT * FROM sdr_records WHERE ${where.join(' AND ')} ORDER BY created_at DESC LIMIT 500`,
+    if (!pagination.paginated) {
+      const result = await pool.query(
+        `SELECT * FROM sdr_records WHERE ${where.join(' AND ')} ORDER BY created_at DESC LIMIT 500`,
+        params
+      );
+      return res.json(rowsToSheetData(result.rows));
+    }
+
+    const countResult = await pool.query(
+      `SELECT COUNT(*)::int AS total FROM sdr_records WHERE ${where.join(' AND ')}`,
       params
     );
+    const dataResult = await pool.query(
+      `SELECT * FROM sdr_records
+       WHERE ${where.join(' AND ')}
+       ORDER BY created_at DESC
+       LIMIT $${params.length + 1}
+       OFFSET $${params.length + 2}`,
+      [...params, pagination.pageSize, pagination.offset]
+    );
 
-    res.json(rowsToSheetData(result.rows));
+    res.json({
+      data: rowsToSheetData(dataResult.rows),
+      pagination: buildPaginationPayload({
+        page: pagination.page,
+        pageSize: pagination.pageSize,
+        total: countResult.rows[0]?.total || 0,
+      }),
+    });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

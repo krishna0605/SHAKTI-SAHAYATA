@@ -405,6 +405,22 @@ export const cdrAPI = {
   async getRecordsByCase(caseId: string): Promise<ApiRecord[]> {
     return apiClient.request(`/cdr/records?caseId=${encodeURIComponent(caseId)}`)
   },
+
+    async getSummary(caseId: string): Promise<Record<string, unknown>> {
+      return apiClient.request(`/cdr/summary?caseId=${encodeURIComponent(caseId)}`)
+    },
+
+    async getFilters(caseId: string): Promise<Record<string, unknown>> {
+      return apiClient.request(`/cdr/filters?caseId=${encodeURIComponent(caseId)}`)
+    },
+
+  async getRecordsPage(
+    caseId: string,
+    params: Record<string, string | number | undefined | null> = {}
+  ): Promise<{ data: ApiRecord[]; pagination: { page: number; pageSize: number; total: number } }> {
+    const query = buildSearchParams({ caseId, ...params })
+    return apiClient.request(`/cdr/records?${query}`)
+  },
 }
 
 /* ------------------------------------------------------------------ */
@@ -522,6 +538,22 @@ export const ipdrAPI = {
     return apiClient.request(`/ipdr/records?caseId=${encodeURIComponent(caseId)}`)
   },
 
+    async getSummary(caseId: string): Promise<Record<string, unknown>> {
+      return apiClient.request(`/ipdr/summary?caseId=${encodeURIComponent(caseId)}`)
+    },
+
+    async getFilters(caseId: string): Promise<Record<string, unknown>> {
+      return apiClient.request(`/ipdr/filters?caseId=${encodeURIComponent(caseId)}`)
+    },
+
+  async getRecordsPage(
+    caseId: string,
+    params: Record<string, string | number | undefined | null> = {}
+  ): Promise<{ data: ApiRecord[]; pagination: { page: number; pageSize: number; total: number } }> {
+    const query = buildSearchParams({ caseId, ...params })
+    return apiClient.request(`/ipdr/records?${query}`)
+  },
+
   async enrichCase(
     caseId: string,
     limit = 5000
@@ -558,6 +590,22 @@ export const ildAPI = {
 
   async getRecords(caseId: string): Promise<ApiRecord[]> {
     return apiClient.request(`/ild/records?caseId=${encodeURIComponent(caseId)}`)
+  },
+
+    async getSummary(caseId: string): Promise<Record<string, unknown>> {
+      return apiClient.request(`/ild/summary?caseId=${encodeURIComponent(caseId)}`)
+    },
+
+    async getFilters(caseId: string): Promise<Record<string, unknown>> {
+      return apiClient.request(`/ild/filters?caseId=${encodeURIComponent(caseId)}`)
+    },
+
+  async getRecordsPage(
+    caseId: string,
+    params: Record<string, string | number | undefined | null> = {}
+  ): Promise<{ data: ApiRecord[]; pagination: { page: number; pageSize: number; total: number } }> {
+    const query = buildSearchParams({ caseId, ...params })
+    return apiClient.request(`/ild/records?${query}`)
   },
 }
 
@@ -597,6 +645,22 @@ export const towerDumpAPI = {
 
   async getRecords(caseId: string): Promise<ApiRecord[]> {
     return apiClient.request(`/tower/records?caseId=${encodeURIComponent(caseId)}`)
+  },
+
+    async getSummary(caseId: string): Promise<Record<string, unknown>> {
+      return apiClient.request(`/tower/summary?caseId=${encodeURIComponent(caseId)}`)
+    },
+
+    async getFilters(caseId: string): Promise<Record<string, unknown>> {
+      return apiClient.request(`/tower/filters?caseId=${encodeURIComponent(caseId)}`)
+    },
+
+  async getRecordsPage(
+    caseId: string,
+    params: Record<string, string | number | undefined | null> = {}
+  ): Promise<{ data: ApiRecord[]; pagination: { page: number; pageSize: number; total: number } }> {
+    const query = buildSearchParams({ caseId, ...params })
+    return apiClient.request(`/tower/records?${query}`)
   },
 
   async getPartyGraph(
@@ -658,6 +722,24 @@ export const sdrAPI = {
 
   async search(q: string, caseId?: string): Promise<SdrRecord[]> {
     const query = buildSearchParams({ q, caseId })
+    return apiClient.request(`/sdr/search?${query}`)
+  },
+
+    async getSummary(caseId: string): Promise<Record<string, unknown>> {
+      return apiClient.request(`/sdr/summary?caseId=${encodeURIComponent(caseId)}`)
+    },
+
+    async getFilters(caseId?: string): Promise<Record<string, unknown>> {
+      const query = buildSearchParams({ caseId })
+      return apiClient.request(`/sdr/filters${query ? `?${query}` : ''}`)
+    },
+
+  async searchPage(
+    q: string,
+    caseId?: string,
+    params: Record<string, string | number | undefined | null> = {}
+  ): Promise<{ data: SdrRecord[]; pagination: { page: number; pageSize: number; total: number } }> {
+    const query = buildSearchParams({ q, caseId, ...params })
     return apiClient.request(`/sdr/search?${query}`)
   },
 

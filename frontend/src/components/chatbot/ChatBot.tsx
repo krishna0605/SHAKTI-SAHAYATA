@@ -1,8 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { caseAPI } from '../lib/apis';
 import { isPotentialPromptInjection, sanitizeUserText } from '../lib/security';
-import { useCaseContextStore } from '../../stores/caseContextStore';
-import type { ActiveCaseContext } from '../../stores/caseContextStore';
 import { useChatbotWorkspaceStore } from '../../stores/chatbotWorkspaceStore';
 import { apiClient, getAccessToken } from '../../lib/apiClient';
 import GroundedAnswerCard, { type ChatAnswerPayload, type ClarificationOption, type GroundedAnswerAction } from './GroundedAnswerCard';
@@ -36,7 +34,30 @@ interface ChatBotProps {
   caseType?: string | null;
 }
 
-interface CaseSuggestion extends ActiveCaseContext {
+interface CaseContextSelection {
+  id: string;
+  caseName: string;
+  caseNumber?: string | null;
+  firNumber?: string | null;
+  caseType?: string | null;
+  operator?: string | null;
+  status?: string | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+  hasFiles?: boolean;
+  availability?: {
+    files?: boolean;
+    cdr?: boolean;
+    ipdr?: boolean;
+    sdr?: boolean;
+    tower?: boolean;
+    ild?: boolean;
+    timeline?: boolean;
+  } | null;
+  locked?: boolean;
+}
+
+interface CaseSuggestion extends CaseContextSelection {
   matchRank?: number;
 }
 
@@ -248,7 +269,7 @@ const toActiveCaseSuggestion = (suggestion: CompactCaseSuggestion): CaseSuggesti
   locked: true
 });
 
-const toResolvedActiveCase = (suggestion: CaseSuggestion): ActiveCaseContext => ({
+const toResolvedCaseContext = (suggestion: CaseSuggestion): CaseContextSelection => ({
   id: suggestion.id,
   caseName: suggestion.caseName,
   caseNumber: suggestion.caseNumber,
@@ -264,10 +285,8 @@ const toResolvedActiveCase = (suggestion: CaseSuggestion): ActiveCaseContext => 
 });
 
 export const ChatBot: React.FC<ChatBotProps> = ({ caseId, caseType }) => {
-  const activeCase = useCaseContextStore((state) => state.activeCase);
-  const setActiveCase = useCaseContextStore((state) => state.setActiveCase);
-  const clearActiveCase = useCaseContextStore((state) => state.clearActiveCase);
   const workspaceContext = useChatbotWorkspaceStore((state) => state.workspaceContext);
+  const [selectedCase, setSelectedCase] = useState<CaseContextSelection | null>(null);
   const [isOpen, setIsOpen] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isDarkTheme, setIsDarkTheme] = useState<boolean>(() => {
@@ -306,6 +325,16 @@ export const ChatBot: React.FC<ChatBotProps> = ({ caseId, caseType }) => {
     }
     return { width: 430, height: 560 };
   });
+
+  useEffect(() => {
+    if (!caseId) {
+      setSelectedCase(null);
+      return;
+    }
+    if (selectedCase && selectedCase.id !== caseId) {
+      setSelectedCase(null);
+    }
+  }, [caseId, selectedCase?.id]);
 
   useEffect(() => {
     if (typeof document === 'undefined') return;
@@ -534,7 +563,7 @@ export const ChatBot: React.FC<ChatBotProps> = ({ caseId, caseType }) => {
       }, 0);
     }
 
-    setActiveCase({
+    setSelectedCase({
       id: suggestion.id,
       caseName: suggestion.caseName,
       caseNumber: suggestion.caseNumber,
@@ -622,8 +651,8 @@ export const ChatBot: React.FC<ChatBotProps> = ({ caseId, caseType }) => {
     setIsSending(true);
 
     try {
-      const previousActiveCaseId = activeCase?.id || null;
-      let requestCase: ActiveCaseContext | null = null;
+      const previousSelectedCaseId = selectedCase?.id || caseId || null;
+      let requestCase: CaseContextSelection | null = null;
       if (explicitTagRef) {
         try {
           const payload = await caseAPI.search(explicitTagRef, 8);
@@ -632,20 +661,20 @@ export const ChatBot: React.FC<ChatBotProps> = ({ caseId, caseType }) => {
           const resolvedSuggestion = exactMatch || suggestions[0] || null;
 
           if (resolvedSuggestion) {
-            const resolvedCase = toResolvedActiveCase(resolvedSuggestion);
+            const resolvedCase = toResolvedCaseContext(resolvedSuggestion);
             requestCase = resolvedCase;
-            setActiveCase(resolvedCase);
+            setSelectedCase(resolvedCase);
           } else {
             requestCase = null;
-            clearActiveCase();
+            setSelectedCase(null);
           }
         } catch {
           requestCase = null;
-          clearActiveCase();
+          setSelectedCase(null);
         }
       }
 
-      const lockedCase = explicitTagRef ? requestCase : activeCase;
+      const lockedCase = explicitTagRef ? requestCase : selectedCase;
       const requestCaseId = lockedCase?.id || caseId || null;
       const requestCaseType = lockedCase?.caseType || caseType || null;
       const shouldResetSession = Boolean(
@@ -653,7 +682,7 @@ export const ChatBot: React.FC<ChatBotProps> = ({ caseId, caseType }) => {
         && explicitTagRef
         && (
           !requestCaseId
-          || (previousActiveCaseId && requestCaseId && previousActiveCaseId !== requestCaseId)
+          || (previousSelectedCaseId && requestCaseId && previousSelectedCaseId !== requestCaseId)
         )
       );
 
@@ -869,9 +898,26 @@ export const ChatBot: React.FC<ChatBotProps> = ({ caseId, caseType }) => {
   };
 
   const applyCompactCaseSuggestion = (suggestion: CompactCaseSuggestion) => {
-    const resolved = toResolvedActiveCase(toActiveCaseSuggestion(suggestion));
-    setActiveCase(resolved);
+    const resolved = toResolvedCaseContext(toActiveCaseSuggestion(suggestion));
+    setSelectedCase(resolved);
   };
+
+  const effectiveCase = selectedCase || (caseId
+    ? {
+      id: caseId,
+      caseName: caseId,
+      caseNumber: null,
+      firNumber: null,
+      caseType: caseType || null,
+      operator: null,
+      status: null,
+      createdAt: null,
+      updatedAt: null,
+      hasFiles: false,
+      availability: null,
+      locked: true,
+    }
+    : null);
 
   const panelClass = useMemo(
     () =>
@@ -896,11 +942,11 @@ export const ChatBot: React.FC<ChatBotProps> = ({ caseId, caseType }) => {
               <div>
                 <div className="text-sm font-semibold">SHAKTI SAHAYATA</div>
                 <div className={`text-[11px] ${isDarkTheme ? 'text-slate-400' : 'text-slate-500'}`}>Online • Navigation and troubleshooting</div>
-                {activeCase ? (
+                {effectiveCase ? (
                   <div className="mt-1 flex items-center gap-2 flex-wrap">
                     <div className={`inline-flex items-center gap-2 rounded-full px-2 py-1 text-[10px] ${isDarkTheme ? 'bg-blue-500/15 text-blue-200' : 'bg-blue-100 text-blue-700'}`}>
                       <span className="material-symbols-outlined text-[13px]">gavel</span>
-                      <span>{activeCase.caseNumber || activeCase.caseName}</span>
+                      <span>{effectiveCase.caseNumber || effectiveCase.caseName}</span>
                       <button
                         type="button"
                         onClick={() => setInputValue('@')}
@@ -913,7 +959,7 @@ export const ChatBot: React.FC<ChatBotProps> = ({ caseId, caseType }) => {
                         onClick={() => {
                           void resetServerSession(sessionId);
                           setSessionId(null);
-                          clearActiveCase();
+                          setSelectedCase(null);
                         }}
                         className={`rounded-full px-1.5 py-0.5 ${isDarkTheme ? 'bg-slate-800 text-slate-200' : 'bg-white text-slate-600'}`}
                       >
@@ -973,7 +1019,7 @@ export const ChatBot: React.FC<ChatBotProps> = ({ caseId, caseType }) => {
           <div className={`px-4 py-2 flex gap-2 flex-wrap border-b ${isDarkTheme ? 'border-white/10' : 'border-slate-200'}`}>
             {(() => {
               const module = workspaceContext?.module || null;
-              const hasCase = Boolean(activeCase?.id || caseId);
+              const hasCase = Boolean(effectiveCase?.id || caseId);
 
               const MODULE_PROMPTS: Record<string, Array<{ label: string; query: string }>> = {
                 cdr: [
@@ -1112,7 +1158,7 @@ export const ChatBot: React.FC<ChatBotProps> = ({ caseId, caseType }) => {
                   value={inputValue}
                   onChange={(e) => setInputValue(e.target.value)}
                   onKeyDown={handleInputKeyDown}
-                  placeholder={activeCase ? 'Tag the case again in this message using @ before asking...' : 'Tag a case in this message using @ before asking a case question...'}
+                  placeholder={effectiveCase ? 'Tag the case again in this message using @ before asking...' : 'Tag a case in this message using @ before asking a case question...'}
                   disabled={isBusy}
                   className={`w-full rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-1 ${isDarkTheme
                     ? 'bg-slate-800/80 text-slate-200 placeholder-slate-500 focus:ring-blue-500'

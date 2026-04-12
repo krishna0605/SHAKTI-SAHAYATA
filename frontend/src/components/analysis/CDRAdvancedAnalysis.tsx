@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { startTransition, useCallback, useEffect, useMemo, useState } from 'react';
 import type { NormalizedCDR } from '../utils/normalization';
 import { cdrAPI, fileAPI } from '../lib/apis';
 import {
@@ -12,8 +12,10 @@ import * as XLSX from 'xlsx-js-style';
 import { encodeSpreadsheetRows } from '../lib/security';
 import { RecordTable } from './RecordTable';
 import { AnalysisTabBar } from './AnalysisTabBar';
+import { usePaginatedAnalysisRecords } from './usePaginatedAnalysisRecords';
 import { useChatbotWorkspaceStore } from '../../stores/chatbotWorkspaceStore';
 import { getMetricUiLabel } from '../../lib/caseQaCatalog';
+import { markPerformanceEvent, trackPerformanceAsync } from '../../lib/performance';
 
 // --- Types & Constants ---
 
@@ -745,6 +747,14 @@ export const AdvancedAnalytics: React.FC<AdvancedAnalyticsProps> = ({ caseId, ca
   const clearWorkspaceContext = useChatbotWorkspaceStore((state) => state.clearWorkspaceContext);
   const [data, setData] = useState<NormalizedCDR[]>(parsedData || []);
   const [isLoading, setIsLoading] = useState(!parsedData || parsedData.length === 0);
+  const [summary, setSummary] = useState<{
+    totalRecords?: number;
+    uniqueAParties?: number;
+    uniqueBParties?: number;
+    totalDurationSec?: number;
+    callTypes?: Array<{ label: string; value: number }>;
+    hourlyActivity?: Array<{ label: string; value: number }>;
+  } | null>(null);
   const [selectedTab, setSelectedTab] = useState<'overview' | 'records' | 'analysis' | 'location'>('overview');
   const [chartRenderKey, setChartRenderKey] = useState(0);
   const [currentTime, setCurrentTime] = useState(new Date());
@@ -764,6 +774,15 @@ export const AdvancedAnalytics: React.FC<AdvancedAnalyticsProps> = ({ caseId, ca
   const [durationMaxFilter, setDurationMaxFilter] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage] = useState(50);
+  const [filterOptions, setFilterOptions] = useState<{ callTypes: string[] }>({ callTypes: [] });
+
+  useEffect(() => {
+    markPerformanceEvent('cdr.route-entered', { caseId: caseId || null });
+  }, [caseId]);
+
+  useEffect(() => {
+    markPerformanceEvent('cdr.shell-rendered', { caseId: caseId || null });
+  }, [caseId]);
 
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
@@ -805,12 +824,41 @@ export const AdvancedAnalytics: React.FC<AdvancedAnalyticsProps> = ({ caseId, ca
       setIsLoading(true);
       const cdrData = await cdrAPI.getRecordsByCase(caseId);
       if (cdrData) {
-        setData((Array.isArray(cdrData) ? cdrData : []) as NormalizedCDR[]);
+        startTransition(() => {
+          setData((Array.isArray(cdrData) ? cdrData : []) as NormalizedCDR[]);
+        });
       }
     } catch (error) {
       console.error('Error loading case data:', error);
     } finally {
       setIsLoading(false);
+    }
+  }, [caseId]);
+
+  const loadCaseSummary = useCallback(async () => {
+    if (!caseId) return;
+    try {
+      const nextSummary = await trackPerformanceAsync(
+        'cdr.summary.load',
+        () => cdrAPI.getSummary(caseId),
+        { caseId }
+      );
+      setSummary((nextSummary && typeof nextSummary === 'object') ? nextSummary as typeof summary : null);
+    } catch (error) {
+      console.error('Error loading CDR summary:', error);
+    }
+  }, [caseId]);
+
+  const loadRecordFilters = useCallback(async () => {
+    if (!caseId) return;
+    try {
+      const nextFilters = await cdrAPI.getFilters(caseId) as { callTypes?: string[] };
+      setFilterOptions({
+        callTypes: Array.isArray(nextFilters?.callTypes) ? nextFilters.callTypes : []
+      });
+    } catch (error) {
+      console.error('Error loading CDR filters:', error);
+      setFilterOptions({ callTypes: [] });
     }
   }, [caseId]);
 
@@ -824,6 +872,32 @@ export const AdvancedAnalytics: React.FC<AdvancedAnalyticsProps> = ({ caseId, ca
       setIsLoading(false);
     }
   }, [caseId, parsedData, loadCaseData]);
+
+  useEffect(() => {
+    if (!caseId) {
+      setSummary(null);
+      setFilterOptions({ callTypes: [] });
+      return;
+    }
+    loadCaseSummary();
+    loadRecordFilters();
+  }, [caseId, loadCaseSummary, loadRecordFilters]);
+
+  useEffect(() => {
+    if (summary) {
+      markPerformanceEvent('cdr.summary.loaded', {
+        caseId: caseId || null,
+        totalRecords: Number(summary.totalRecords || 0)
+      });
+    }
+  }, [caseId, summary]);
+
+  useEffect(() => {
+    markPerformanceEvent('cdr.tab-opened', { caseId: caseId || null, tab: selectedTab });
+    if (selectedTab === 'analysis' || selectedTab === 'location') {
+      markPerformanceEvent('cdr.heavy-tab-rendered', { caseId: caseId || null, tab: selectedTab });
+    }
+  }, [caseId, selectedTab]);
 
   useEffect(() => {
     if (!caseId) return;
@@ -1025,7 +1099,7 @@ export const AdvancedAnalytics: React.FC<AdvancedAnalyticsProps> = ({ caseId, ca
       searchState: selectedTab === 'records'
         ? {
             query: searchTerm || null,
-            resultCount: filteredRecords.length
+            resultCount: recordsResultCount
           }
         : null,
       selectionTimestamp: new Date().toISOString()
@@ -1057,13 +1131,61 @@ export const AdvancedAnalytics: React.FC<AdvancedAnalyticsProps> = ({ caseId, ca
     setCurrentPage(1);
   }, [fileFilteredData, searchTerm, callTypeFilter, dateFromFilter, dateToFilter, durationMinFilter, durationMaxFilter]);
 
+  const recordsQueryKey = useMemo(
+    () => [
+      selectedFileIds.join(','),
+      searchTerm,
+      callTypeFilter,
+      dateFromFilter,
+      dateToFilter,
+      durationMinFilter,
+      durationMaxFilter
+    ].join('|'),
+    [selectedFileIds, searchTerm, callTypeFilter, dateFromFilter, dateToFilter, durationMinFilter, durationMaxFilter]
+  );
+
+  const {
+    data: remoteRecords,
+    loading: recordsLoading,
+    error: recordsError,
+    pagination: recordsPagination,
+    totalPages: remoteTotalPages,
+    showingStart: remoteShowingStart,
+    showingEnd: remoteShowingEnd
+  } = usePaginatedAnalysisRecords<NormalizedCDR>({
+    enabled: Boolean(caseId && selectedTab === 'records'),
+    moduleKey: 'cdr',
+    page: currentPage,
+    pageSize: itemsPerPage,
+    fetchPage: async () => {
+      const response = await cdrAPI.getRecordsPage(caseId!, {
+        page: currentPage,
+        pageSize: itemsPerPage,
+        search: searchTerm || undefined,
+        callType: callTypeFilter || undefined,
+        dateFrom: dateFromFilter || undefined,
+        dateTo: dateToFilter || undefined,
+        durationMin: durationMinFilter || undefined,
+        durationMax: durationMaxFilter || undefined,
+        fileIds: selectedFileIds.length > 0 ? selectedFileIds.join(',') : undefined
+      });
+      return response as { data: NormalizedCDR[]; pagination: { page: number; pageSize: number; total: number } };
+    },
+    deps: [recordsQueryKey]
+  });
+
   const totalPages = Math.max(1, Math.ceil(filteredRecords.length / itemsPerPage));
   const startIndex = (currentPage - 1) * itemsPerPage;
   const currentPageData = filteredRecords.slice(startIndex, startIndex + itemsPerPage);
   const showingStart = filteredRecords.length === 0 ? 0 : startIndex + 1;
   const showingEnd = Math.min(startIndex + itemsPerPage, filteredRecords.length);
+  const recordsRows = caseId ? remoteRecords : currentPageData;
+  const recordsTotalPages = caseId ? remoteTotalPages : totalPages;
+  const recordsShowingStart = caseId ? remoteShowingStart : showingStart;
+  const recordsShowingEnd = caseId ? remoteShowingEnd : showingEnd;
+  const recordsResultCount = caseId ? recordsPagination.total : filteredRecords.length;
 
-  const goToPage = (page: number) => setCurrentPage(Math.max(1, Math.min(page, totalPages)));
+  const goToPage = (page: number) => setCurrentPage(Math.max(1, Math.min(page, recordsTotalPages)));
 
   // 2. Stats Calculation
   const stats = useMemo(() => {
@@ -1088,6 +1210,26 @@ export const AdvancedAnalytics: React.FC<AdvancedAnalyticsProps> = ({ caseId, ca
 
     return { totalRecords, uniqueAParties, uniqueBParties, avgDuration, callTypes, incoming, outgoing, sms };
   }, [fileFilteredData]);
+
+  const overviewStats = useMemo(() => {
+    if (fileFilteredData.length > 0 || !summary) return stats;
+
+    const totalRecords = Number(summary.totalRecords || 0);
+    const totalDurationSec = Number(summary.totalDurationSec || 0);
+
+    return {
+      ...stats,
+      totalRecords,
+      uniqueAParties: Number(summary.uniqueAParties || 0),
+      uniqueBParties: Number(summary.uniqueBParties || 0),
+      avgDuration: totalRecords > 0 ? Math.round(totalDurationSec / totalRecords) : 0,
+      callTypes: Object.fromEntries(
+        Array.isArray(summary.callTypes)
+          ? summary.callTypes.map((entry) => [String(entry.label || 'UNKNOWN'), Number(entry.value || 0)])
+          : []
+      ),
+    };
+  }, [fileFilteredData.length, stats, summary]);
 
   // 3. Max B Party Analysis
   const maxBPartyData = useMemo(() => {
@@ -1477,6 +1619,17 @@ export const AdvancedAnalytics: React.FC<AdvancedAnalyticsProps> = ({ caseId, ca
     return hours;
   }, [fileFilteredData]);
 
+  const overviewHourlyActivityData = useMemo(() => {
+    if (fileFilteredData.length > 0 || !summary || !Array.isArray(summary.hourlyActivity)) {
+      return hourlyActivityData;
+    }
+
+    return summary.hourlyActivity.map((entry) => ({
+      hour: Number.parseInt(String(entry.label || '0'), 10) || 0,
+      count: Number(entry.value || 0),
+    }));
+  }, [fileFilteredData.length, hourlyActivityData, summary]);
+
   // 14. Day First/Last Call
   const dayFirstLastData = useMemo(() => {
     const days: Record<string, { date: string, first: string, last: string, duration: number, count: number }> = {};
@@ -1528,17 +1681,6 @@ export const AdvancedAnalytics: React.FC<AdvancedAnalyticsProps> = ({ caseId, ca
     if (currentPeriod) periods.push(currentPeriod);
     return periods;
   }, [fileFilteredData]);
-
-
-  if (isLoading) {
-    return (
-      <div className="flex flex-col items-center justify-center h-full">
-        <span className="material-symbols-outlined text-4xl text-blue-500 animate-spin">sync</span>
-        <p className="mt-4 text-slate-600 dark:text-slate-400">Loading CDR Data...</p>
-      </div>
-    );
-  }
-
   return (
     <div className="analysis-shell relative z-0 flex h-full flex-col overflow-hidden font-display">
       {/* Header */}
@@ -1668,6 +1810,12 @@ export const AdvancedAnalytics: React.FC<AdvancedAnalyticsProps> = ({ caseId, ca
             </div>
           </div>
         )}
+
+        {isLoading && data.length === 0 ? (
+          <div className="mb-6 rounded-2xl border border-blue-200 bg-blue-50/80 px-4 py-3 text-sm text-blue-700 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-200">
+            Loading CDR records in the background. The workspace stays interactive while detailed analysis hydrates.
+          </div>
+        ) : null}
         
         {/* OVERVIEW TAB */}
         {selectedTab === 'overview' && (
@@ -1675,10 +1823,10 @@ export const AdvancedAnalytics: React.FC<AdvancedAnalyticsProps> = ({ caseId, ca
             {/* Stats Cards */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
               {[
-                { label: getMetricUiLabel('total_records', 'Total Records'), value: stats.totalRecords.toLocaleString(), icon: 'description', color: 'blue' },
-                { label: getMetricUiLabel('unique_a_parties', 'Unique A-Parties'), value: stats.uniqueAParties.toLocaleString(), icon: 'person', color: 'green' },
-                { label: getMetricUiLabel('unique_b_parties', 'Unique B-Parties'), value: stats.uniqueBParties.toLocaleString(), icon: 'group', color: 'purple' },
-                { label: getMetricUiLabel('avg_duration_sec', 'Avg Duration'), value: `${stats.avgDuration}s`, icon: 'timer', color: 'orange' }
+                { label: getMetricUiLabel('total_records', 'Total Records'), value: overviewStats.totalRecords.toLocaleString(), icon: 'description', color: 'blue' },
+                { label: getMetricUiLabel('unique_a_parties', 'Unique A-Parties'), value: overviewStats.uniqueAParties.toLocaleString(), icon: 'person', color: 'green' },
+                { label: getMetricUiLabel('unique_b_parties', 'Unique B-Parties'), value: overviewStats.uniqueBParties.toLocaleString(), icon: 'group', color: 'purple' },
+                { label: getMetricUiLabel('avg_duration_sec', 'Avg Duration'), value: `${overviewStats.avgDuration}s`, icon: 'timer', color: 'orange' }
               ].map((stat, i) => (
                 <div key={i} className="rounded-2xl border border-slate-200/80 bg-white p-6 shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg dark:border-slate-800 dark:bg-[#111c38]">
                   <div className="flex items-center gap-3 mb-2">
@@ -1701,7 +1849,7 @@ export const AdvancedAnalytics: React.FC<AdvancedAnalyticsProps> = ({ caseId, ca
                   minWidth={320}
                   minHeight={200}
                 >
-                  <LineChart data={hourlyActivityData}>
+                  <LineChart data={overviewHourlyActivityData}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#cbd5e1" opacity={0.24} />
                     <XAxis dataKey="hour" />
                     <YAxis />
@@ -1818,12 +1966,16 @@ export const AdvancedAnalytics: React.FC<AdvancedAnalyticsProps> = ({ caseId, ca
                   onChange={e => setSearchTerm(e.target.value)}
                   className="px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg outline-none"
                 />
-                <input 
-                  placeholder="Call Type (e.g. MOC)" 
-                  value={callTypeFilter} 
+                <select
+                  value={callTypeFilter}
                   onChange={e => setCallTypeFilter(e.target.value)}
                   className="px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg outline-none"
-                />
+                >
+                  <option value="">All Call Types</option>
+                  {filterOptions.callTypes.map(type => (
+                    <option key={type} value={type}>{type}</option>
+                  ))}
+                </select>
                 <input 
                   type="date" 
                   value={dateFromFilter}  
@@ -1855,14 +2007,24 @@ export const AdvancedAnalytics: React.FC<AdvancedAnalyticsProps> = ({ caseId, ca
 
             {/* Table */}
             <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden">
+              {recordsError ? (
+                <div className="border-b border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-500/20 dark:bg-rose-500/10 dark:text-rose-200">
+                  {recordsError}
+                </div>
+              ) : null}
+              {recordsLoading ? (
+                <div className="border-b border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-700 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-200">
+                  Loading CDR records...
+                </div>
+              ) : null}
               <div className="max-h-[600px] overflow-y-auto">
-                <RecordTable rows={currentPageData as unknown as Record<string, unknown>[]} maxRows={50} />
+                <RecordTable rows={recordsRows as unknown as Record<string, unknown>[]} maxRows={50} />
               </div>
               
               {/* Pagination */}
               <div className="p-4 border-t border-slate-200 dark:border-slate-700 flex items-center justify-between">
                 <span className="text-sm text-slate-500">
-                  Showing {showingStart}-{showingEnd} of {filteredRecords.length}
+                  Showing {recordsShowingStart}-{recordsShowingEnd} of {recordsResultCount}
                 </span>
                 <div className="flex gap-2">
                   <button 
@@ -1870,9 +2032,9 @@ export const AdvancedAnalytics: React.FC<AdvancedAnalyticsProps> = ({ caseId, ca
                     onClick={() => goToPage(currentPage - 1)}
                     className="px-3 py-1 bg-slate-100 dark:bg-slate-700 rounded disabled:opacity-50"
                   >Prev</button>
-                  <span className="px-3 py-1">{currentPage} / {totalPages}</span>
+                  <span className="px-3 py-1">{currentPage} / {recordsTotalPages}</span>
                   <button 
-                    disabled={currentPage === totalPages}
+                    disabled={currentPage === recordsTotalPages}
                     onClick={() => goToPage(currentPage + 1)}
                     className="px-3 py-1 bg-slate-100 dark:bg-slate-700 rounded disabled:opacity-50"
                   >Next</button>

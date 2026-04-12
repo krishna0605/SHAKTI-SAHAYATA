@@ -6,6 +6,7 @@ import { parseCSV, type NormalizedCDR, type Operator as CDROperator } from '../c
 import { parseSDRCsv, type NormalizedSDR } from '../components/utils/sdrNormalization'
 import { parseTowerDumpCsvAsync } from '../components/utils/towerDumpParserAsync'
 import type { NormalizedTowerDump } from '../components/utils/towerDumpNormalization'
+import { markPerformanceEvent, startPerformanceSpan, trackPerformanceAsync } from './performance'
 
 export type CaseUploadSlotKey = 'cdr' | 'sdr' | 'ipdr' | 'tower' | 'ild'
 
@@ -21,11 +22,33 @@ export interface CaseUploadFailure {
   message: string
 }
 
-interface IngestCaseUploadsParams {
+export type CaseUploadRuntimeStatus =
+  | 'queued'
+  | 'parsing'
+  | 'uploading'
+  | 'classifying'
+  | 'ingesting'
+  | 'enriching'
+  | 'completed'
+  | 'failed'
+
+export interface CaseUploadStatusUpdate {
+  taskKey: string
+  fileName: string
+  slotKey: CaseUploadSlotKey
+  fileIndex: number
+  status: CaseUploadRuntimeStatus
+  message: string
+  insertedCount?: number
+}
+
+export interface IngestCaseUploadsParams {
   caseId: number
   operator: string
   uploads: CaseUploadSlotInput[]
   onProgress?: (slotKey: CaseUploadSlotKey, message: string) => void
+  onStatusUpdate?: (update: CaseUploadStatusUpdate) => void
+  autoEnrichIpdr?: boolean
 }
 
 const SLOT_LABELS: Record<CaseUploadSlotKey, string> = {
@@ -261,7 +284,28 @@ export async function ingestCaseUploads({
   operator,
   uploads,
   onProgress,
+  onStatusUpdate,
+  autoEnrichIpdr = true,
 }: IngestCaseUploadsParams): Promise<CaseUploadFailure[]> {
+  const detailed = await ingestCaseUploadsDetailed({
+    caseId,
+    operator,
+    uploads,
+    onProgress,
+    onStatusUpdate,
+    autoEnrichIpdr,
+  })
+  return detailed.failures
+}
+
+export async function ingestCaseUploadsDetailed({
+  caseId,
+  operator,
+  uploads,
+  onProgress,
+  onStatusUpdate,
+  autoEnrichIpdr = true,
+}: IngestCaseUploadsParams): Promise<{ failures: CaseUploadFailure[]; insertedIpdrRecords: number }> {
   const failures: CaseUploadFailure[] = []
   let insertedIpdrRecords = 0
 
@@ -271,42 +315,146 @@ export async function ingestCaseUploads({
     for (let fileIndex = 0; fileIndex < slot.files.length; fileIndex += 1) {
       const file = slot.files[fileIndex]
       const fileOrdinalLabel = `${fileIndex + 1}/${slot.files.length}`
+      const taskKey = `${slot.key}:${fileIndex}:${file.name}`
+      const finishFileSpan = startPerformanceSpan('case-upload.file', {
+        caseId,
+        slotKey: slot.key,
+        fileName: file.name,
+        fileIndex,
+      })
 
       try {
+        markPerformanceEvent('case-upload.route-entered', {
+          caseId,
+          slotKey: slot.key,
+          fileName: file.name,
+        })
+        onStatusUpdate?.({
+          taskKey,
+          fileName: file.name,
+          slotKey: slot.key,
+          fileIndex,
+          status: 'parsing',
+          message: `Parsing ${fileOrdinalLabel}: ${file.name}...`,
+        })
         onProgress?.(slot.key, `Parsing ${fileOrdinalLabel}: ${file.name}...`)
-        const parsedRecords = await parseRecordsForSlot(slot.key, file, fileIndex, operator)
+        const parsedRecords = await trackPerformanceAsync(
+          'case-upload.parse',
+          () => parseRecordsForSlot(slot.key, file, fileIndex, operator),
+          {
+            caseId,
+            slotKey: slot.key,
+            fileName: file.name,
+          },
+        )
 
         if (!Array.isArray(parsedRecords) || parsedRecords.length === 0) {
           throw new Error(`No valid ${SLOT_LABELS[slot.key]} records were detected.`)
         }
 
+        markPerformanceEvent('case-upload.records-parsed', {
+          caseId,
+          slotKey: slot.key,
+          fileName: file.name,
+          parsedRecords: parsedRecords.length,
+        })
+
         await yieldToUI()
+        onStatusUpdate?.({
+          taskKey,
+          fileName: file.name,
+          slotKey: slot.key,
+          fileIndex,
+          status: 'uploading',
+          message: `Uploading ${fileOrdinalLabel}: ${file.name}...`,
+        })
         onProgress?.(slot.key, `Uploading ${fileOrdinalLabel}: ${file.name}...`)
-        const uploadedFile = await fileAPI.upload(String(caseId), file, operator, slot.key)
+        const uploadedFile = await trackPerformanceAsync(
+          'case-upload.upload-and-finalize',
+          () => fileAPI.upload(String(caseId), file, operator, slot.key),
+          {
+            caseId,
+            slotKey: slot.key,
+            fileName: file.name,
+            fileSize: file.size,
+          },
+        )
 
         if (!uploadedFile?.id) {
           throw new Error('The file was uploaded, but the server did not return a file id.')
         }
 
         await yieldToUI()
-        onProgress?.(slot.key, `Saving ${parsedRecords.length} ${SLOT_LABELS[slot.key]} records from ${fileOrdinalLabel}: ${file.name}...`)
-        const insertedCount = await insertRecordsForSlot(
-          slot.key,
+        onStatusUpdate?.({
+          taskKey,
+          fileName: file.name,
+          slotKey: slot.key,
+          fileIndex,
+          status: 'classifying',
+          message: `Finalizing ${fileOrdinalLabel}: ${file.name}...`,
+        })
+        onProgress?.(slot.key, `Finalizing ${fileOrdinalLabel}: ${file.name}...`)
+        markPerformanceEvent('case-upload.file-finalized', {
           caseId,
-          uploadedFile.id,
-          parsedRecords as object[],
-          file,
-          fileIndex
+          slotKey: slot.key,
+          fileName: file.name,
+          uploadedFileId: uploadedFile.id,
+        })
+
+        await yieldToUI()
+        onStatusUpdate?.({
+          taskKey,
+          fileName: file.name,
+          slotKey: slot.key,
+          fileIndex,
+          status: 'ingesting',
+          message: `Saving ${parsedRecords.length} ${SLOT_LABELS[slot.key]} records from ${fileOrdinalLabel}: ${file.name}...`,
+        })
+        onProgress?.(slot.key, `Saving ${parsedRecords.length} ${SLOT_LABELS[slot.key]} records from ${fileOrdinalLabel}: ${file.name}...`)
+        const insertedCount = await trackPerformanceAsync(
+          'case-upload.insert-records',
+          () => insertRecordsForSlot(
+            slot.key,
+            caseId,
+            uploadedFile.id,
+            parsedRecords as object[],
+            file,
+            fileIndex
+          ),
+          {
+            caseId,
+            slotKey: slot.key,
+            fileName: file.name,
+            uploadedFileId: uploadedFile.id,
+            parsedRecords: parsedRecords.length,
+          },
         )
 
         if (slot.key === 'ipdr') {
           insertedIpdrRecords += insertedCount
         }
 
+        markPerformanceEvent('case-upload.records-inserted', {
+          caseId,
+          slotKey: slot.key,
+          fileName: file.name,
+          insertedCount,
+        })
+
+        onStatusUpdate?.({
+          taskKey,
+          fileName: file.name,
+          slotKey: slot.key,
+          fileIndex,
+          status: 'completed',
+          insertedCount,
+          message: `Processed ${fileOrdinalLabel}: ${file.name} (${insertedCount}/${parsedRecords.length} ${SLOT_LABELS[slot.key]} records)`,
+        })
         onProgress?.(
           slot.key,
           `Processed ${fileOrdinalLabel}: ${file.name} (${insertedCount}/${parsedRecords.length} ${SLOT_LABELS[slot.key]} records)`
         )
+        finishFileSpan({ status: 'completed', insertedCount })
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error)
         failures.push({
@@ -314,15 +462,46 @@ export async function ingestCaseUploads({
           slotKey: slot.key,
           message: buildFailureMessage(slot.key, file.name, reason),
         })
+        onStatusUpdate?.({
+          taskKey,
+          fileName: file.name,
+          slotKey: slot.key,
+          fileIndex,
+          status: 'failed',
+          message: reason,
+        })
         onProgress?.(slot.key, reason)
+        finishFileSpan({ status: 'failed', error: reason })
       }
     }
   }
 
-  if (insertedIpdrRecords > 0) {
+  if (autoEnrichIpdr && insertedIpdrRecords > 0) {
     try {
+      markPerformanceEvent('case-upload.enrichment-started', { caseId, insertedIpdrRecords })
+      onStatusUpdate?.({
+        taskKey: 'ipdr:enrichment',
+        fileName: 'IPDR intelligence',
+        slotKey: 'ipdr',
+        fileIndex: -1,
+        status: 'enriching',
+        message: 'Enriching IP intelligence...',
+      })
       onProgress?.('ipdr', 'Enriching IP intelligence...')
-      await ipdrAPI.enrichCase(String(caseId), 5000)
+      await trackPerformanceAsync(
+        'case-upload.ipdr-enrichment',
+        () => ipdrAPI.enrichCase(String(caseId), 5000),
+        { caseId, insertedIpdrRecords },
+      )
+      onStatusUpdate?.({
+        taskKey: 'ipdr:enrichment',
+        fileName: 'IPDR intelligence',
+        slotKey: 'ipdr',
+        fileIndex: -1,
+        status: 'completed',
+        message: 'IP intelligence enrichment complete',
+      })
+      markPerformanceEvent('case-upload.enrichment-completed', { caseId })
       onProgress?.('ipdr', 'IP intelligence enrichment complete')
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error)
@@ -331,9 +510,18 @@ export async function ingestCaseUploads({
         slotKey: 'ipdr',
         message: `IPDR enrichment failed after upload: ${reason}`,
       })
+      onStatusUpdate?.({
+        taskKey: 'ipdr:enrichment',
+        fileName: 'IPDR intelligence',
+        slotKey: 'ipdr',
+        fileIndex: -1,
+        status: 'failed',
+        message: `IP intelligence enrichment skipped: ${reason}`,
+      })
+      markPerformanceEvent('case-upload.enrichment-failed', { caseId, error: reason })
       onProgress?.('ipdr', `IP intelligence enrichment skipped: ${reason}`)
     }
   }
 
-  return failures
+  return { failures, insertedIpdrRecords }
 }

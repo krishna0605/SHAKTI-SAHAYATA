@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { startTransition, useCallback, useEffect, useMemo, useState } from 'react';
 import { ResponsiveContainer, LineChart, Line, CartesianGrid, XAxis, YAxis, Tooltip, BarChart, Bar } from 'recharts';
 import { MapContainer, TileLayer, CircleMarker, Popup, useMap } from 'react-leaflet';
 import L from 'leaflet';
@@ -9,8 +9,10 @@ import { ipdrAPI } from '../lib/apis';
 import { encodeSpreadsheetRows } from '../lib/security';
 import { RecordTable } from './RecordTable';
 import { AnalysisTabBar } from './AnalysisTabBar';
+import { usePaginatedAnalysisRecords } from './usePaginatedAnalysisRecords';
 import { useChatbotWorkspaceStore } from '../../stores/chatbotWorkspaceStore';
 import { getMetricUiLabel } from '../../lib/caseQaCatalog';
+import { markPerformanceEvent, trackPerformanceAsync } from '../../lib/performance';
 
 interface ModuleConfig {
   id: string;
@@ -581,6 +583,13 @@ export default function IPDRAnalytics({ caseId, caseName, operator, parsedData, 
   const setWorkspaceContext = useChatbotWorkspaceStore((state) => state.setWorkspaceContext);
   const clearWorkspaceContext = useChatbotWorkspaceStore((state) => state.clearWorkspaceContext);
   const [data, setData] = useState<NormalizedIPDR[]>(parsedData || []);
+  const [isLoading, setIsLoading] = useState(!parsedData || parsedData.length === 0);
+  const [summary, setSummary] = useState<{
+    totalRecords?: number;
+    uniqueIps?: number;
+    uniqueMsisdn?: number;
+    totalVolumeBytes?: number;
+  } | null>(null);
   const [selectedTab, setSelectedTab] = useState<'overview' | 'records' | 'analysis' | 'map' | 'charts'>('overview');
   const [filteredData, setFilteredData] = useState<NormalizedIPDR[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
@@ -589,12 +598,18 @@ export default function IPDRAnalytics({ caseId, caseName, operator, parsedData, 
   const [itemsPerPage] = useState(50);
   const [isExporting, setIsExporting] = useState(false);
   const fileCountState = fileCount;
-  const attemptedCaseBackfillRef = useRef<string | null>(null);
-
   const [msisdnFilter, setMsisdnFilter] = useState('');
   const [imeiFilter, setImeiFilter] = useState('');
   const [imsiFilter, setImsiFilter] = useState('');
   const [ipFilter, setIpFilter] = useState('');
+
+  useEffect(() => {
+    markPerformanceEvent('ipdr.route-entered', { caseId: caseId || null });
+  }, [caseId]);
+
+  useEffect(() => {
+    markPerformanceEvent('ipdr.shell-rendered', { caseId: caseId || null });
+  }, [caseId]);
 
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
@@ -604,37 +619,66 @@ export default function IPDRAnalytics({ caseId, caseName, operator, parsedData, 
   const loadCaseData = useCallback(async () => {
     if (!caseId) return;
     try {
+      setIsLoading(true);
       const records = await ipdrAPI.getRecordsByCase(caseId);
-      const next = (Array.isArray(records) ? records : []) as NormalizedIPDR[];
-      setData(next);
-
-      const hasMissingIpInfo = next.some((row) => {
-        const hasSource = Boolean(row.source_ip || row.source_ip_public_v4 || row.source_ip_public_v6);
-        const hasDest = Boolean(row.destination_ip || row.destination_ip_v4 || row.destination_ip_v6);
-        return (hasSource && !row.source_ip_info) || (hasDest && !row.destination_ip_info);
+      startTransition(() => {
+        setData((Array.isArray(records) ? records : []) as NormalizedIPDR[]);
       });
-      if (hasMissingIpInfo && attemptedCaseBackfillRef.current !== caseId) {
-        attemptedCaseBackfillRef.current = caseId;
-        try {
-          await ipdrAPI.enrichCase(caseId, 5000);
-          const refreshed = await ipdrAPI.getRecordsByCase(caseId);
-          setData((Array.isArray(refreshed) ? refreshed : []) as NormalizedIPDR[]);
-        } catch (error) {
-          console.warn('[IPDRAnalytics] IP intelligence backfill skipped:', error);
-        }
-      }
     } catch (error) {
       console.error('Failed to load IPDR records:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [caseId]);
+
+  const loadCaseSummary = useCallback(async () => {
+    if (!caseId) return;
+    try {
+      const nextSummary = await trackPerformanceAsync(
+        'ipdr.summary.load',
+        () => ipdrAPI.getSummary(caseId),
+        { caseId }
+      );
+      setSummary((nextSummary && typeof nextSummary === 'object') ? nextSummary as typeof summary : null);
+    } catch (error) {
+      console.error('Failed to load IPDR summary:', error);
     }
   }, [caseId]);
 
   useEffect(() => {
     if (parsedData && parsedData.length > 0) {
       setData(parsedData);
+      setIsLoading(false);
     } else if (caseId) {
       loadCaseData();
+    } else {
+      setIsLoading(false);
     }
   }, [caseId, parsedData, loadCaseData]);
+
+  useEffect(() => {
+    if (!caseId) {
+      setSummary(null);
+      return;
+    }
+    loadCaseSummary();
+  }, [caseId, loadCaseSummary]);
+
+  useEffect(() => {
+    if (summary) {
+      markPerformanceEvent('ipdr.summary.loaded', {
+        caseId: caseId || null,
+        totalRecords: Number(summary.totalRecords || 0)
+      });
+    }
+  }, [caseId, summary]);
+
+  useEffect(() => {
+    markPerformanceEvent('ipdr.tab-opened', { caseId: caseId || null, tab: selectedTab });
+    if (selectedTab === 'analysis' || selectedTab === 'map' || selectedTab === 'charts') {
+      markPerformanceEvent('ipdr.heavy-tab-rendered', { caseId: caseId || null, tab: selectedTab });
+    }
+  }, [caseId, selectedTab]);
 
   // Filter Logic
   useEffect(() => {
@@ -677,6 +721,16 @@ export default function IPDRAnalytics({ caseId, caseName, operator, parsedData, 
       uniqueMSISDNs
     };
   }, [data]);
+
+  const overviewStats = useMemo(() => {
+    if (data.length > 0 || !summary) return stats;
+    return {
+      totalRecords: Number(summary.totalRecords || 0),
+      totalVolume: formatBytes(Number(summary.totalVolumeBytes || 0)),
+      uniqueIPs: Number(summary.uniqueIps || 0),
+      uniqueMSISDNs: Number(summary.uniqueMsisdn || 0)
+    };
+  }, [data.length, stats, summary]);
 
   const trafficByHourData = useMemo(() => {
     const hours = Array(24).fill(0).map((_, i) => ({ hour: i, uplinkMB: 0, downlinkMB: 0, totalMB: 0 }));
@@ -1059,7 +1113,7 @@ export default function IPDRAnalytics({ caseId, caseName, operator, parsedData, 
       searchState: selectedTab === 'records'
         ? {
             query: searchTerm || null,
-            resultCount: filteredData.length
+            resultCount: recordsResultCount
           }
         : null,
       mapState: selectedTab === 'map'
@@ -1088,6 +1142,39 @@ export default function IPDRAnalytics({ caseId, caseName, operator, parsedData, 
     clearWorkspaceContext();
   }, [clearWorkspaceContext]);
 
+  const recordsQueryKey = useMemo(
+    () => [searchTerm, msisdnFilter, imeiFilter, imsiFilter, ipFilter].join('|'),
+    [searchTerm, msisdnFilter, imeiFilter, imsiFilter, ipFilter]
+  );
+
+  const {
+    data: remoteRecords,
+    loading: recordsLoading,
+    error: recordsError,
+    pagination: recordsPagination,
+    totalPages: remoteTotalPages,
+    showingStart: remoteShowingStart,
+    showingEnd: remoteShowingEnd
+  } = usePaginatedAnalysisRecords<NormalizedIPDR>({
+    enabled: Boolean(caseId && selectedTab === 'records'),
+    moduleKey: 'ipdr',
+    page: currentPage,
+    pageSize: itemsPerPage,
+    fetchPage: async () => {
+      const response = await ipdrAPI.getRecordsPage(caseId!, {
+        page: currentPage,
+        pageSize: itemsPerPage,
+        search: searchTerm || undefined,
+        msisdn: msisdnFilter || undefined,
+        imei: imeiFilter || undefined,
+        imsi: imsiFilter || undefined,
+        ip: ipFilter || undefined,
+      });
+      return response as { data: NormalizedIPDR[]; pagination: { page: number; pageSize: number; total: number } };
+    },
+    deps: [recordsQueryKey]
+  });
+
   // Pagination
   const totalPages = Math.max(1, Math.ceil(filteredData.length / itemsPerPage));
   const paginatedData = filteredData.slice(
@@ -1096,6 +1183,11 @@ export default function IPDRAnalytics({ caseId, caseName, operator, parsedData, 
   );
   const showingStart = filteredData.length === 0 ? 0 : (currentPage - 1) * itemsPerPage + 1;
   const showingEnd = Math.min(currentPage * itemsPerPage, filteredData.length);
+  const recordsRows = caseId ? remoteRecords : paginatedData;
+  const recordsTotalPages = caseId ? remoteTotalPages : totalPages;
+  const recordsShowingStart = caseId ? remoteShowingStart : showingStart;
+  const recordsShowingEnd = caseId ? remoteShowingEnd : showingEnd;
+  const recordsResultCount = caseId ? recordsPagination.total : filteredData.length;
 
   const handleExportExcel = async () => {
     if (isExporting) return;
@@ -1166,24 +1258,30 @@ export default function IPDRAnalytics({ caseId, caseName, operator, parsedData, 
 
       {/* Content */}
       <div className="analysis-content custom-scrollbar flex-1 overflow-y-auto p-6">
+        {isLoading && data.length === 0 ? (
+          <div className="mb-6 rounded-2xl border border-cyan-200 bg-cyan-50/80 px-4 py-3 text-sm text-cyan-700 dark:border-cyan-500/20 dark:bg-cyan-500/10 dark:text-cyan-200">
+            Loading IPDR records in the background. Summary cards stay available while the detailed dataset finishes loading.
+          </div>
+        ) : null}
+
         {selectedTab === 'overview' && (
           <div className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
               <div className="analysis-panel p-4">
                 <div className="text-sm text-slate-500">{getMetricUiLabel('total_records', 'Total Records')}</div>
-                <div className="text-2xl font-bold">{stats.totalRecords.toLocaleString()}</div>
+                <div className="text-2xl font-bold">{overviewStats.totalRecords.toLocaleString()}</div>
               </div>
               <div className="analysis-panel p-4">
                 <div className="text-sm text-slate-500">Data Volume</div>
-                <div className="text-2xl font-bold">{stats.totalVolume}</div>
+                <div className="text-2xl font-bold">{overviewStats.totalVolume}</div>
               </div>
               <div className="analysis-panel p-4">
                 <div className="text-sm text-slate-500">Unique IPs</div>
-                <div className="text-2xl font-bold">{stats.uniqueIPs.toLocaleString()}</div>
+                <div className="text-2xl font-bold">{overviewStats.uniqueIPs.toLocaleString()}</div>
               </div>
               <div className="analysis-panel p-4">
                 <div className="text-sm text-slate-500">Unique MSISDNs</div>
-                <div className="text-2xl font-bold">{stats.uniqueMSISDNs.toLocaleString()}</div>
+                <div className="text-2xl font-bold">{overviewStats.uniqueMSISDNs.toLocaleString()}</div>
               </div>
             </div>
             
@@ -1264,11 +1362,21 @@ export default function IPDRAnalytics({ caseId, caseName, operator, parsedData, 
             </div>
 
             <div className="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
+              {recordsError ? (
+                <div className="border-b border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-500/20 dark:bg-rose-500/10 dark:text-rose-200">
+                  {recordsError}
+                </div>
+              ) : null}
+              {recordsLoading ? (
+                <div className="border-b border-cyan-200 bg-cyan-50 px-4 py-3 text-sm text-cyan-700 dark:border-cyan-500/20 dark:bg-cyan-500/10 dark:text-cyan-200">
+                  Loading IPDR records...
+                </div>
+              ) : null}
               <div className="max-h-[50vh] overflow-y-auto">
-                <RecordTable rows={paginatedData as unknown as Record<string, unknown>[]} maxRows={50} />
+                <RecordTable rows={recordsRows as unknown as Record<string, unknown>[]} maxRows={50} />
               </div>
               <div className="p-4 border-t border-slate-200 dark:border-slate-700 flex justify-between items-center">
-               <span className="text-sm text-slate-500">Showing {showingStart}-{showingEnd} of {filteredData.length} records</span>
+               <span className="text-sm text-slate-500">Showing {recordsShowingStart}-{recordsShowingEnd} of {recordsResultCount} records</span>
                  <div className="flex gap-2">
                     <button 
                       disabled={currentPage === 1}
@@ -1276,8 +1384,8 @@ export default function IPDRAnalytics({ caseId, caseName, operator, parsedData, 
                       className="px-3 py-1 bg-slate-100 dark:bg-slate-700 rounded disabled:opacity-50"
                     >Prev</button>
                     <button 
-                      disabled={currentPage === totalPages}
-                      onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                      disabled={currentPage === recordsTotalPages}
+                      onClick={() => setCurrentPage(p => Math.min(recordsTotalPages, p + 1))}
                       className="px-3 py-1 bg-slate-100 dark:bg-slate-700 rounded disabled:opacity-50"
                     >Next</button>
                  </div>

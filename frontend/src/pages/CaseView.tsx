@@ -1,8 +1,8 @@
 import { useState, useEffect, lazy, Suspense, useMemo, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { caseAPI, fileAPI, recordCountAPI } from '../components/lib/apis';
-import { ingestCaseUploads, type CaseUploadSlotKey } from '../lib/caseFileIngestion';
-import { useCaseContextStore } from '../stores/caseContextStore';
+import { useCaseIngestionStore } from '../stores/caseIngestionStore';
+import { startCaseIngestionRun } from '../lib/caseIngestionRunner';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -129,7 +129,8 @@ export default function CaseView() {
   const [{ uploadingTab, deletingFileId }, setFileActionState] = useState(EMPTY_FILE_ACTION_STATE);
   const [fileActionMessage, setFileActionMessage] = useState('');
   const [caseActionState, setCaseActionState] = useState<'archive' | 'delete' | null>(null);
-  const setActiveCase = useCaseContextStore((state) => state.setActiveCase);
+  const ingestionRuns = useCaseIngestionStore((state) => state.runs);
+  const ingestionTasks = useCaseIngestionStore((state) => state.tasks);
   const fileInputRefs = useRef<Record<FileTabKey, HTMLInputElement | null>>({
     cdr: null,
     ipdr: null,
@@ -150,22 +151,6 @@ export default function CaseView() {
       setActiveTab('data');
     }
   }, [dataType]);
-
-  useEffect(() => {
-    if (!caseData) return;
-    setActiveCase({
-      id: String(caseData.id),
-      caseName: caseData.case_name,
-      caseNumber: caseData.case_number,
-      firNumber: caseData.fir_number,
-      caseType: caseData.case_type,
-      operator: caseData.operator,
-      status: caseData.status,
-      createdAt: caseData.created_at,
-      hasFiles: Number(caseData.file_count || 0) > 0,
-      locked: true
-    });
-  }, [caseData, setActiveCase]);
 
   useEffect(() => {
     if (activeTab !== 'timeline' || !id) return;
@@ -214,22 +199,47 @@ export default function CaseView() {
   };
 
   const loadRecordCounts = async () => {
-    const counts: Record<string, number> = {};
-    for (const dt of DATA_TYPES) {
-      try {
-        if (!id) continue;
-        counts[dt.key] = await recordCountAPI.getCountByCase(
-          dt.key as 'cdr' | 'ipdr' | 'sdr' | 'tower' | 'ild',
-          String(id)
-        );
-      } catch { counts[dt.key] = 0; }
-    }
-    setRecordCounts(counts);
+    if (!id) return;
+    const entries = await Promise.all(
+      DATA_TYPES.map(async (dt) => {
+        try {
+          const count = await recordCountAPI.getCountByCase(
+            dt.key as 'cdr' | 'ipdr' | 'sdr' | 'tower' | 'ild',
+            String(id)
+          );
+          return [dt.key, count] as const;
+        } catch {
+          return [dt.key, 0] as const;
+        }
+      })
+    );
+    setRecordCounts(Object.fromEntries(entries));
   };
 
   const refreshCaseWorkspace = async () => {
     await Promise.all([loadCase(), loadFiles(), loadRecordCounts()]);
   };
+
+  const caseRuns = useMemo(() => (
+    Object.values(ingestionRuns)
+      .filter((run) => run.caseId === String(id))
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+  ), [id, ingestionRuns]);
+
+  const latestRun = caseRuns[0] || null;
+
+  const latestRunTasks = useMemo(() => {
+    if (!latestRun) return [];
+    return Object.values(ingestionTasks)
+      .filter((task) => task.runId === latestRun.id)
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  }, [ingestionTasks, latestRun]);
+
+  useEffect(() => {
+    if (!latestRun) return;
+    if (latestRun.status === 'running') return;
+    void refreshCaseWorkspace();
+  }, [latestRun?.id, latestRun?.status]);
 
   const getPriorityClass = (p: string) => {
     const map: Record<string, string> = { critical: 'priority-critical', high: 'priority-high', medium: 'priority-medium', low: 'priority-low' };
@@ -269,35 +279,28 @@ export default function CaseView() {
 
     const incomingFiles = Array.from(selectedFiles);
     setFileActionState({ uploadingTab: tabKey, deletingFileId: null });
-    setFileActionMessage(`Preparing ${incomingFiles.length} ${FILE_TAB_LABELS[tabKey]} file${incomingFiles.length > 1 ? 's' : ''}...`);
+    setFileActionMessage(`Preparing ${incomingFiles.length} ${FILE_TAB_LABELS[tabKey]} file${incomingFiles.length > 1 ? 's' : ''} for background ingestion...`);
 
     try {
-      const failures = await ingestCaseUploads({
+      await startCaseIngestionRun({
         caseId: caseData.id,
         operator: caseData.operator || '',
         uploads: [
           {
-            key: tabKey as CaseUploadSlotKey,
+            key: tabKey,
             label: FILE_TAB_LABELS[tabKey],
             files: incomingFiles,
           },
         ],
-        onProgress: (_slotKey, message) => {
-          setFileActionMessage(message);
-        },
       });
 
-      await refreshCaseWorkspace();
       setSelectedFileTab(tabKey);
-
-      if (failures.length > 0) {
-        failures.forEach((failure) => toast.error(failure.message));
-        toast.warning(`${failures.length} ${FILE_TAB_LABELS[tabKey]} upload issue${failures.length > 1 ? 's' : ''} need review.`);
-        setFileActionMessage(`Completed with ${failures.length} upload issue${failures.length > 1 ? 's' : ''}.`);
-      } else {
-        toast.success(`${incomingFiles.length} ${FILE_TAB_LABELS[tabKey]} file${incomingFiles.length > 1 ? 's' : ''} uploaded successfully.`);
-        setFileActionMessage(`${incomingFiles.length} ${FILE_TAB_LABELS[tabKey]} file${incomingFiles.length > 1 ? 's were' : ' was'} uploaded and ingested successfully.`);
-      }
+      toast.success(
+        `${incomingFiles.length} ${FILE_TAB_LABELS[tabKey]} file${incomingFiles.length > 1 ? 's are' : ' is'} now processing in the workspace.`
+      );
+      setFileActionMessage(
+        `${incomingFiles.length} ${FILE_TAB_LABELS[tabKey]} file${incomingFiles.length > 1 ? 's have' : ' has'} been handed off for background ingestion.`
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to upload files';
       setFileActionMessage(message);
@@ -481,6 +484,61 @@ export default function CaseView() {
         <div className={tiltShellClass}>
         <Card className="rounded-[1.75rem] border-border/70 bg-white/50 shadow-xl dark:bg-slate-900/50">
           <CardContent className="space-y-6 p-6 sm:p-8">
+            {latestRun ? (
+              <div className="rounded-[1.5rem] border border-blue-200/70 bg-blue-50/80 p-5 dark:border-blue-500/20 dark:bg-blue-500/10">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-700 dark:text-blue-300">
+                      File Processing
+                    </p>
+                    <h3 className="mt-2 text-lg font-bold text-slate-900 dark:text-white">
+                      {latestRun.status === 'running'
+                        ? 'Uploads are still being processed'
+                        : latestRun.status === 'completed'
+                          ? 'File processing completed'
+                          : latestRun.status === 'completed_with_errors'
+                            ? 'File processing completed with warnings'
+                            : 'File processing encountered issues'}
+                    </h3>
+                    <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
+                      The case workspace stays usable while file parsing, upload finalization, ingestion, and optional IP enrichment continue in the background.
+                    </p>
+                  </div>
+                  <Badge className="w-fit rounded-full border border-blue-300/30 bg-white/80 text-blue-700 dark:border-blue-400/20 dark:bg-slate-900/40 dark:text-blue-200">
+                    {latestRunTasks.filter((task) => task.status === 'completed').length}/{latestRunTasks.length || latestRun.totalTasks} completed
+                  </Badge>
+                </div>
+
+                {latestRunTasks.length > 0 ? (
+                  <div className="mt-4 grid gap-3">
+                    {latestRunTasks.map((task) => (
+                      <div
+                        key={task.id}
+                        className="rounded-2xl border border-white/60 bg-white/80 px-4 py-3 shadow-sm dark:border-white/10 dark:bg-slate-950/40"
+                      >
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                          <div>
+                            <div className="text-sm font-semibold text-slate-900 dark:text-white">{task.fileName}</div>
+                            <div className="mt-1 text-xs text-slate-600 dark:text-slate-400">{task.message}</div>
+                          </div>
+                          <Badge
+                            className={cn(
+                              'w-fit rounded-full capitalize',
+                              task.status === 'completed' && 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-200',
+                              task.status === 'failed' && 'bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-200',
+                              task.status !== 'completed' && task.status !== 'failed' && 'bg-blue-100 text-blue-700 dark:bg-blue-500/15 dark:text-blue-200'
+                            )}
+                          >
+                            {task.status.replace('_', ' ')}
+                          </Badge>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+
             {caseData.investigation_details && (
               <div className="case-section">
                 <h3 className="mb-2 text-xl font-bold">Investigation Details</h3>

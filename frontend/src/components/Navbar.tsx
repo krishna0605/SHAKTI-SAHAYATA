@@ -1,7 +1,6 @@
 import { Link, useLocation, useNavigate } from 'react-router-dom'
-import { BriefcaseBusiness, FolderPlus, LayoutDashboard, LogOut, Menu, Moon, Search, Settings, Sun } from 'lucide-react'
+import { FolderPlus, LayoutDashboard, LogOut, Menu, Moon, Search, Settings, Sun } from 'lucide-react'
 import { useAuthStore } from '../stores/authStore'
-import { useCaseContextStore } from '../stores/caseContextStore'
 import { api } from '../lib/api'
 import { BrandMark } from '@/components/shared/BrandMark'
 import { Button } from '@/components/ui/button'
@@ -34,8 +33,6 @@ const navItems = [
 
 export default function Navbar() {
   const { user, isDarkMode, toggleTheme, logout } = useAuthStore()
-  const activeCase = useCaseContextStore((state) => state.activeCase)
-  const clearActiveCase = useCaseContextStore((state) => state.clearActiveCase)
   const navigate = useNavigate()
   const location = useLocation()
 
@@ -56,29 +53,6 @@ export default function Navbar() {
           <Link to="/dashboard" className="interactive-ring rounded-2xl">
             <BrandMark compact />
           </Link>
-
-          {activeCase ? (
-            <div className="hidden items-center gap-3 rounded-2xl border border-shakti-300/20 bg-shakti-50/85 px-3 py-2 lg:flex dark:border-shakti-400/20 dark:bg-shakti-500/10">
-              <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-shakti-100 text-shakti-700 dark:bg-shakti-500/10 dark:text-shakti-300">
-                <BriefcaseBusiness className="h-5 w-5" />
-              </div>
-              <div className="min-w-0">
-                <div className="text-[11px] uppercase tracking-[0.2em] text-shakti-700/80 dark:text-shakti-200/90">Active Case</div>
-                <div className="truncate text-sm font-medium text-slate-800 dark:text-slate-100">
-                  {activeCase.caseNumber || `Case ${activeCase.id}`}
-                </div>
-              </div>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="rounded-xl border border-white/10 bg-white/50 dark:bg-white/5"
-                onClick={clearActiveCase}
-              >
-                Clear
-              </Button>
-            </div>
-          ) : null}
         </div>
 
         <div className="hidden items-center gap-2 md:flex">
@@ -130,15 +104,6 @@ export default function Navbar() {
               </SheetHeader>
 
               <div className="space-y-2 px-4 pb-4 pt-2">
-                {activeCase ? (
-                  <div className="rounded-2xl border border-shakti-400/20 bg-shakti-500/10 p-4">
-                    <div className="text-[11px] uppercase tracking-[0.2em] text-shakti-200">Active Case</div>
-                    <div className="mt-2 text-sm font-medium text-white">
-                      {activeCase.caseNumber || `Case ${activeCase.id}`}
-                    </div>
-                  </div>
-                ) : null}
-
                 {navItems.map(({ to, label, icon: Icon }) => {
                   const active = location.pathname === to
                   return (

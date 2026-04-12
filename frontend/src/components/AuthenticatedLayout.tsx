@@ -1,12 +1,14 @@
-import { Outlet } from 'react-router-dom'
+import { Outlet, useMatch } from 'react-router-dom'
 import { lazy, Suspense } from 'react'
 import Navbar from './Navbar'
-import { useCaseContextStore } from '../stores/caseContextStore'
 
 const ChatBot = lazy(() => import('./chatbot/ChatBot').then((m) => ({ default: m.ChatBot })))
 
 export default function AuthenticatedLayout() {
-  const activeCase = useCaseContextStore((state) => state.activeCase)
+  const caseRouteMatch = useMatch('/case/:id')
+  const caseModuleRouteMatch = useMatch('/case/:id/:dataType')
+  const activeCaseId = caseModuleRouteMatch?.params.id || caseRouteMatch?.params.id || null
+  const activeCaseType = caseModuleRouteMatch?.params.dataType || null
 
   return (
     <div className="relative min-h-screen overflow-hidden bg-background">
@@ -21,7 +23,7 @@ export default function AuthenticatedLayout() {
 
       <Suspense fallback={null}>
         <div className="fixed bottom-5 right-5 z-50 flex flex-col items-end sm:bottom-6 sm:right-6">
-          <ChatBot caseId={activeCase?.id || null} caseType={activeCase?.caseType || null} />
+          <ChatBot caseId={activeCaseId} caseType={activeCaseType} />
         </div>
       </Suspense>
     </div>

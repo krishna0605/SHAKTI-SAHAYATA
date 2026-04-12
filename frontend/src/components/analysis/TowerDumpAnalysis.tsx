@@ -8,10 +8,12 @@ import * as XLSX from 'xlsx-js-style';
 import { encodeSpreadsheetRows } from '../lib/security';
 import { RecordTable } from './RecordTable';
 import { AnalysisTabBar } from './AnalysisTabBar';
+import { usePaginatedAnalysisRecords } from './usePaginatedAnalysisRecords';
 import { useChatbotWorkspaceStore } from '../../stores/chatbotWorkspaceStore';
 import { getMetricUiLabel } from '../../lib/caseQaCatalog';
 import { Network, DataSet } from 'vis-network/standalone';
 import 'vis-network/styles/vis-network.css';
+import { markPerformanceEvent, trackPerformanceAsync } from '../../lib/performance';
 
 interface TowerDumpAnalysisProps {
   caseId?: string;
@@ -932,6 +934,14 @@ export const TowerDumpAnalysis: React.FC<TowerDumpAnalysisProps> = ({
   const clearWorkspaceContext = useChatbotWorkspaceStore((state) => state.clearWorkspaceContext);
   const [data, setData] = useState<NormalizedTowerDump[]>(initialData || []);
   const [loading, setLoading] = useState(!initialData && !!caseId);
+  const [summary, setSummary] = useState<{
+    totalRecords?: number;
+    uniqueAParties?: number;
+    uniqueBParties?: number;
+    avgDurationSec?: number;
+    callTypes?: Array<{ label: string; value: number }>;
+    topParties?: Array<{ label: string; value: number }>;
+  } | null>(null);
 
   const [selectedTab, setSelectedTab] = useState<'overview' | 'records' | 'map' | 'graph' | 'party_graph' | 'charts'>('overview');
   const [searchTerm, setSearchTerm] = useState('');
@@ -950,6 +960,7 @@ export const TowerDumpAnalysis: React.FC<TowerDumpAnalysisProps> = ({
   const [dateToFilter, setDateToFilter] = useState('');
   const [durationMinFilter, setDurationMinFilter] = useState('');
   const [durationMaxFilter, setDurationMaxFilter] = useState('');
+  const [filterOptions, setFilterOptions] = useState<{ callTypes: string[] }>({ callTypes: [] });
 
   // Map-specific state
   const [selectedTower, setSelectedTower] = useState<string | null>(null);
@@ -963,6 +974,14 @@ export const TowerDumpAnalysis: React.FC<TowerDumpAnalysisProps> = ({
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
     return () => clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    markPerformanceEvent('tower.route-entered', { caseId: caseId || null });
+  }, [caseId]);
+
+  useEffect(() => {
+    markPerformanceEvent('tower.shell-rendered', { caseId: caseId || null });
+  }, [caseId]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -1027,11 +1046,57 @@ export const TowerDumpAnalysis: React.FC<TowerDumpAnalysisProps> = ({
     }
   }, [caseId, operator]);
 
+  const loadSummary = useCallback(async () => {
+    if (!caseId) return;
+    try {
+      const nextSummary = await trackPerformanceAsync(
+        'tower.summary.load',
+        () => towerDumpAPI.getSummary(caseId),
+        { caseId }
+      );
+      setSummary((nextSummary && typeof nextSummary === 'object') ? nextSummary as typeof summary : null);
+    } catch (error) {
+      console.error('[TowerDumpAnalysis] Failed to load tower dump summary:', error);
+    }
+  }, [caseId]);
+
+  const loadRecordFilters = useCallback(async () => {
+    if (!caseId) return;
+    try {
+      const nextFilters = await towerDumpAPI.getFilters(caseId) as { callTypes?: string[] };
+      setFilterOptions({
+        callTypes: Array.isArray(nextFilters?.callTypes) ? nextFilters.callTypes : []
+      });
+    } catch (error) {
+      console.error('[TowerDumpAnalysis] Failed to load tower dump filters:', error);
+      setFilterOptions({ callTypes: [] });
+    }
+  }, [caseId]);
+
   useEffect(() => {
     if (caseId && !initialData) {
       fetchData();
     }
   }, [caseId, fetchData, initialData]);
+
+  useEffect(() => {
+    if (!caseId) {
+      setSummary(null);
+      setFilterOptions({ callTypes: [] });
+      return;
+    }
+    loadSummary();
+    loadRecordFilters();
+  }, [caseId, loadSummary, loadRecordFilters]);
+
+  useEffect(() => {
+    if (summary) {
+      markPerformanceEvent('tower.summary.loaded', {
+        caseId: caseId || null,
+        totalRecords: Number(summary.totalRecords || 0)
+      });
+    }
+  }, [caseId, summary]);
 
   const filteredData = useMemo(() => {
     if (selectedTab !== 'records') return data;
@@ -1090,6 +1155,13 @@ export const TowerDumpAnalysis: React.FC<TowerDumpAnalysisProps> = ({
   }, [selectedTab, data, deferredSearchTerm, callTypeFilter, dateFromFilter, dateToFilter, durationMinFilter, durationMaxFilter]);
 
   useEffect(() => {
+    markPerformanceEvent('tower.tab-opened', { caseId: caseId || null, tab: selectedTab });
+    if (selectedTab === 'map' || selectedTab === 'graph' || selectedTab === 'party_graph' || selectedTab === 'charts') {
+      markPerformanceEvent('tower.heavy-tab-rendered', { caseId: caseId || null, tab: selectedTab });
+    }
+  }, [caseId, selectedTab]);
+
+  useEffect(() => {
     if (!caseId) {
       clearWorkspaceContext();
       return;
@@ -1119,7 +1191,7 @@ export const TowerDumpAnalysis: React.FC<TowerDumpAnalysisProps> = ({
       searchState: selectedTab === 'records'
         ? {
             query: searchTerm || null,
-            resultCount: filteredData.length
+            resultCount: caseId ? recordsPagination.total : filteredData.length
           }
         : null,
       mapState: selectedTab === 'map' || selectedTab === 'graph'
@@ -1176,6 +1248,40 @@ export const TowerDumpAnalysis: React.FC<TowerDumpAnalysisProps> = ({
     }
   }, [selectedTab, deferredSearchTerm, callTypeFilter, dateFromFilter, dateToFilter, durationMinFilter, durationMaxFilter]);
 
+  const recordsQueryKey = useMemo(
+    () => [deferredSearchTerm, callTypeFilter, dateFromFilter, dateToFilter, durationMinFilter, durationMaxFilter, itemsPerPage].join('|'),
+    [deferredSearchTerm, callTypeFilter, dateFromFilter, dateToFilter, durationMinFilter, durationMaxFilter, itemsPerPage]
+  );
+
+  const {
+    data: remoteRecords,
+    loading: recordsLoading,
+    error: recordsError,
+    pagination: recordsPagination,
+    totalPages: remoteTotalPages,
+    showingStart: remoteShowingStart,
+    showingEnd: remoteShowingEnd
+  } = usePaginatedAnalysisRecords<NormalizedTowerDump>({
+    enabled: Boolean(caseId && selectedTab === 'records'),
+    moduleKey: 'tower',
+    page: currentPage,
+    pageSize: itemsPerPage,
+    fetchPage: async () => {
+      const response = await towerDumpAPI.getRecordsPage(caseId!, {
+        page: currentPage,
+        pageSize: itemsPerPage,
+        search: deferredSearchTerm || undefined,
+        callType: callTypeFilter || undefined,
+        dateFrom: dateFromFilter || undefined,
+        dateTo: dateToFilter || undefined,
+        durationMin: durationMinFilter || undefined,
+        durationMax: durationMaxFilter || undefined
+      });
+      return response as { data: NormalizedTowerDump[]; pagination: { page: number; pageSize: number; total: number } };
+    },
+    deps: [recordsQueryKey]
+  });
+
   // Pagination logic
   const totalPages = Math.max(1, Math.ceil(filteredData.length / itemsPerPage));
   const startIndex = (currentPage - 1) * itemsPerPage;
@@ -1183,6 +1289,11 @@ export const TowerDumpAnalysis: React.FC<TowerDumpAnalysisProps> = ({
   const currentPageData = filteredData.slice(startIndex, endIndex);
   const showingStart = filteredData.length === 0 ? 0 : startIndex + 1;
   const showingEnd = Math.min(endIndex, filteredData.length);
+  const recordsRows = caseId ? remoteRecords : currentPageData;
+  const recordsTotalPages = caseId ? remoteTotalPages : totalPages;
+  const recordsShowingStart = caseId ? remoteShowingStart : showingStart;
+  const recordsShowingEnd = caseId ? remoteShowingEnd : showingEnd;
+  const recordsResultCount = caseId ? recordsPagination.total : filteredData.length;
 
   useEffect(() => {
     setCurrentPage(1);
@@ -1203,8 +1314,10 @@ export const TowerDumpAnalysis: React.FC<TowerDumpAnalysisProps> = ({
 
   // Get unique call types for filter dropdown
   const uniqueCallTypes = useMemo(
-    () => Array.from(new Set(data.map(r => r.call_type).filter(Boolean))).sort(),
-    [data]
+    () => (filterOptions.callTypes.length > 0
+      ? filterOptions.callTypes
+      : Array.from(new Set(data.map(r => r.call_type).filter(Boolean))).sort()),
+    [data, filterOptions.callTypes]
   );
 
   const formatTime = (date: Date) => {
@@ -1384,6 +1497,26 @@ export const TowerDumpAnalysis: React.FC<TowerDumpAnalysisProps> = ({
       roamingCircleData
     };
   }, [data]);
+
+  const overviewStats = useMemo((): TowerDumpStats => {
+    if (data.length > 0 || !summary) return stats;
+
+    return {
+      ...stats,
+      totalRecords: Number(summary.totalRecords || 0),
+      uniqueAParties: Number(summary.uniqueAParties || 0),
+      uniqueBParties: Number(summary.uniqueBParties || 0),
+      avgDuration: Math.round(Number(summary.avgDurationSec || 0)),
+      callTypes: Object.fromEntries(
+        Array.isArray(summary.callTypes)
+          ? summary.callTypes.map((entry) => [String(entry.label || 'UNKNOWN'), Number(entry.value || 0)])
+          : []
+      ),
+      commonCallers: Array.isArray(summary.topParties)
+        ? summary.topParties.map((entry) => [String(entry.label || 'UNKNOWN'), Number(entry.value || 0)] as [string, number])
+        : [],
+    };
+  }, [data.length, stats, summary]);
 
   const buildTowerDumpSheets = (rows: NormalizedTowerDump[]) => {
     const sheet1Headers = [
@@ -2005,21 +2138,15 @@ export const TowerDumpAnalysis: React.FC<TowerDumpAnalysisProps> = ({
 
       {/* Content */}
       <div className="analysis-content custom-scrollbar flex-1 overflow-y-auto p-6">
+        {loading && data.length === 0 ? (
+          <div className="mb-6 rounded-2xl border border-blue-200 bg-blue-50/80 px-4 py-3 text-sm text-blue-700 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-200">
+            Loading tower dump records in the background. The workspace stays interactive while detailed analytics hydrate.
+          </div>
+        ) : null}
+
         {selectedTab === 'overview' && (
           <div className="max-w-7xl mx-auto space-y-6">
-            {loading ? (
-              // Loading state
-              <div className="flex flex-col items-center justify-center py-16 text-center">
-                <span className="material-symbols-outlined text-6xl text-slate-400 animate-spin">sync</span>
-                <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-2">Loading Tower Dump Records</h3>
-                <p className="text-slate-600 dark:text-slate-400 mb-6 max-w-md">
-                  Fetching records for case: {caseName}
-                </p>
-                <div className="text-xs text-slate-500 dark:text-slate-500 font-mono bg-slate-100 dark:bg-slate-800 px-3 py-2 rounded">
-                  Case ID: {caseId}
-                </div>
-              </div>
-            ) : data.length === 0 ? (
+            {!loading && data.length === 0 && !summary ? (
               // Empty state
               <div className="flex flex-col items-center justify-center py-16 text-center">
                 <span className="material-symbols-outlined text-6xl text-slate-400 mb-4">analytics_off</span>
@@ -2041,7 +2168,7 @@ export const TowerDumpAnalysis: React.FC<TowerDumpAnalysisProps> = ({
                   <span className="material-symbols-outlined text-2xl text-blue-500">description</span>
                   <h3 className="text-lg font-bold text-slate-900 dark:text-white">{getMetricUiLabel('total_records', 'Total Records')}</h3>
                 </div>
-                <p className="text-3xl font-black text-blue-600 dark:text-blue-400">{stats.totalRecords.toLocaleString()}</p>
+                <p className="text-3xl font-black text-blue-600 dark:text-blue-400">{overviewStats.totalRecords.toLocaleString()}</p>
                 <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">From {fileCountState} file(s)</p>
               </div>
 
@@ -2050,7 +2177,7 @@ export const TowerDumpAnalysis: React.FC<TowerDumpAnalysisProps> = ({
                   <span className="material-symbols-outlined text-2xl text-green-500">person</span>
                   <h3 className="text-lg font-bold text-slate-900 dark:text-white">Unique A-Parties</h3>
                 </div>
-                <p className="text-3xl font-black text-green-600 dark:text-green-400">{stats.uniqueAParties.toLocaleString()}</p>
+                <p className="text-3xl font-black text-green-600 dark:text-green-400">{overviewStats.uniqueAParties.toLocaleString()}</p>
                 <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">Target numbers</p>
               </div>
 
@@ -2059,7 +2186,7 @@ export const TowerDumpAnalysis: React.FC<TowerDumpAnalysisProps> = ({
                   <span className="material-symbols-outlined text-2xl text-purple-500">call</span>
                   <h3 className="text-lg font-bold text-slate-900 dark:text-white">Unique B-Parties</h3>
                 </div>
-                <p className="text-3xl font-black text-purple-600 dark:text-purple-400">{stats.uniqueBParties.toLocaleString()}</p>
+                <p className="text-3xl font-black text-purple-600 dark:text-purple-400">{overviewStats.uniqueBParties.toLocaleString()}</p>
                 <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">Called numbers</p>
               </div>
 
@@ -2068,7 +2195,7 @@ export const TowerDumpAnalysis: React.FC<TowerDumpAnalysisProps> = ({
                   <span className="material-symbols-outlined text-2xl text-orange-500">schedule</span>
                   <h3 className="text-lg font-bold text-slate-900 dark:text-white">Avg Duration</h3>
                 </div>
-                <p className="text-3xl font-black text-orange-600 dark:text-orange-400">{stats.avgDuration}s</p>
+                <p className="text-3xl font-black text-orange-600 dark:text-orange-400">{overviewStats.avgDuration}s</p>
                 <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">Per call</p>
               </div>
             </div>
@@ -2111,7 +2238,7 @@ export const TowerDumpAnalysis: React.FC<TowerDumpAnalysisProps> = ({
             <div className="bg-surface-light dark:bg-surface-dark rounded-xl border border-border-light dark:border-slate-800 p-6">
               <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-4">Common Callers (A-Party)</h3>
               <div className="space-y-2">
-                {stats.commonCallers.length > 0 ? stats.commonCallers.map(([caller, count]) => (
+                {overviewStats.commonCallers.length > 0 ? overviewStats.commonCallers.map(([caller, count]) => (
                   <div key={caller} className="flex justify-between items-center">
                     <span className="font-mono text-sm text-slate-900 dark:text-white">{caller}</span>
                     <span className="text-sm font-medium text-slate-600 dark:text-slate-400">{count} calls</span>
@@ -2127,20 +2254,20 @@ export const TowerDumpAnalysis: React.FC<TowerDumpAnalysisProps> = ({
               <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-4">Other State Calls Summary</h3>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                 <div className="text-center">
-                  <div className="text-2xl font-bold text-slate-900 dark:text-white">{stats.otherStateSummary.count}</div>
+                  <div className="text-2xl font-bold text-slate-900 dark:text-white">{overviewStats.otherStateSummary.count}</div>
                   <div className="text-sm text-slate-600 dark:text-slate-400">Total Calls</div>
                 </div>
                 <div className="text-center">
-                  <div className="text-2xl font-bold text-slate-900 dark:text-white">{stats.otherStateSummary.uniqueCallers}</div>
+                  <div className="text-2xl font-bold text-slate-900 dark:text-white">{overviewStats.otherStateSummary.uniqueCallers}</div>
                   <div className="text-sm text-slate-600 dark:text-slate-400">Unique Callers</div>
                 </div>
                 <div className="text-center">
-                  <div className="text-2xl font-bold text-slate-900 dark:text-white">{stats.otherStateSummary.avgDuration}s</div>
+                  <div className="text-2xl font-bold text-slate-900 dark:text-white">{overviewStats.otherStateSummary.avgDuration}s</div>
                   <div className="text-sm text-slate-600 dark:text-slate-400">Avg Duration</div>
                 </div>
                 <div className="text-center">
-                  <div className="text-2xl font-bold text-slate-900 dark:text-white">{stats.roamingCircleSummary[0]?.name || 'N/A'}</div>
-                  <div className="text-sm text-slate-600 dark:text-slate-400">Top Roaming Circle ({stats.roamingCircleSummary[0]?.value || 0} calls)</div>
+                  <div className="text-2xl font-bold text-slate-900 dark:text-white">{overviewStats.roamingCircleSummary[0]?.name || 'N/A'}</div>
+                  <div className="text-sm text-slate-600 dark:text-slate-400">Top Roaming Circle ({overviewStats.roamingCircleSummary[0]?.value || 0} calls)</div>
                 </div>
               </div>
 
@@ -2156,7 +2283,7 @@ export const TowerDumpAnalysis: React.FC<TowerDumpAnalysisProps> = ({
                       </tr>
                     </thead>
                     <tbody>
-                      {stats.roamingCircleSummary.length > 0 ? stats.roamingCircleSummary.map((item, index) => (
+                      {overviewStats.roamingCircleSummary.length > 0 ? overviewStats.roamingCircleSummary.map((item, index) => (
                         <tr key={index} className="border-b border-slate-200 dark:border-slate-600">
                           <td className="py-2 px-3 text-slate-900 dark:text-white">{item.name}</td>
                           <td className="py-2 px-3 text-slate-900 dark:text-white">{item.value}</td>
@@ -2176,7 +2303,7 @@ export const TowerDumpAnalysis: React.FC<TowerDumpAnalysisProps> = ({
             <div className="bg-surface-light dark:bg-surface-dark rounded-xl border border-border-light dark:border-slate-800 p-6">
               <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-4">Call Types Distribution</h3>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                {Object.entries(stats.callTypes).map(([type, count]) => (
+                {Object.entries(overviewStats.callTypes).map(([type, count]) => (
                   <div key={type} className="text-center">
                     <div className="text-2xl font-bold text-slate-900 dark:text-white">{count}</div>
                     <div className="text-sm text-slate-600 dark:text-slate-400">{type}</div>
@@ -2304,16 +2431,26 @@ export const TowerDumpAnalysis: React.FC<TowerDumpAnalysisProps> = ({
 
             {/* Records Table */}
             <div className="bg-surface-light dark:bg-surface-dark rounded-xl border border-border-light dark:border-slate-800 overflow-hidden">
+              {recordsError ? (
+                <div className="border-b border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-500/20 dark:bg-rose-500/10 dark:text-rose-200">
+                  {recordsError}
+                </div>
+              ) : null}
+              {recordsLoading ? (
+                <div className="border-b border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-700 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-200">
+                  Loading tower dump records...
+                </div>
+              ) : null}
               <div className="max-h-[600px] overflow-y-auto">
-                <RecordTable rows={currentPageData as unknown as Record<string, unknown>[]} maxRows={50} />
+                <RecordTable rows={recordsRows as unknown as Record<string, unknown>[]} maxRows={50} />
               </div>
 
               <div className="p-4 border-t border-slate-200 dark:border-slate-700">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-4 text-sm text-slate-600 dark:text-slate-400">
                     <div>
-                      Showing {showingStart}-{showingEnd} of {filteredData.length} records
-                      {filteredData.length !== data.length && ` (filtered from ${data.length} total)`}
+                      Showing {recordsShowingStart}-{recordsShowingEnd} of {recordsResultCount} records
+                      {!caseId && filteredData.length !== data.length && ` (filtered from ${data.length} total)`}
                     </div>
                     <div className="flex items-center gap-2">
                       <span className="text-xs text-slate-500 dark:text-slate-500">Rows</span>
@@ -2339,9 +2476,9 @@ export const TowerDumpAnalysis: React.FC<TowerDumpAnalysisProps> = ({
                     </button>
 
                     <div className="flex items-center gap-1">
-                      {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
-                        const pageNum = Math.max(1, Math.min(totalPages - 4, currentPage - 2)) + i;
-                        if (pageNum > totalPages) return null;
+                      {Array.from({ length: Math.min(5, recordsTotalPages) }, (_, i) => {
+                        const pageNum = Math.max(1, Math.min(recordsTotalPages - 4, currentPage - 2)) + i;
+                        if (pageNum > recordsTotalPages) return null;
                         return (
                           <button
                             key={pageNum}
@@ -2362,7 +2499,7 @@ export const TowerDumpAnalysis: React.FC<TowerDumpAnalysisProps> = ({
                       <input
                         type="number"
                         min={1}
-                        max={totalPages}
+                        max={recordsTotalPages}
                         value={currentPage}
                         onChange={(e) => {
                           const next = Number(e.target.value);
@@ -2370,12 +2507,12 @@ export const TowerDumpAnalysis: React.FC<TowerDumpAnalysisProps> = ({
                         }}
                         className="w-16 px-2 py-1 text-sm bg-white dark:bg-background-dark border border-slate-300 dark:border-slate-700 rounded text-slate-700 dark:text-slate-300"
                       />
-                      <span className="text-xs text-slate-500 dark:text-slate-500">of {totalPages}</span>
+                      <span className="text-xs text-slate-500 dark:text-slate-500">of {recordsTotalPages}</span>
                     </div>
 
                     <button
                       onClick={() => goToPage(currentPage + 1)}
-                      disabled={currentPage === totalPages}
+                      disabled={currentPage === recordsTotalPages}
                       className="px-3 py-1 text-sm bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 rounded hover:bg-slate-200 dark:hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                     >
                       <span className="material-symbols-outlined text-sm">chevron_right</span>

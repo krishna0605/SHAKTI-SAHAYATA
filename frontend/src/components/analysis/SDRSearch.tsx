@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { sdrAPI } from '../lib/apis';
 import { useChatbotWorkspaceStore } from '../../stores/chatbotWorkspaceStore';
+import { markPerformanceEvent, trackPerformanceAsync } from '../../lib/performance';
 
 type SDRData = Record<string, string | number | null | undefined>;
 
@@ -33,13 +34,32 @@ interface SDRSearchProps {
   caseId?: string;
 }
 
+interface SdrSummary {
+  totalRecords: number;
+  uniqueMsisdn: number;
+  uniqueSubscribers: number;
+  uniqueImei: number;
+  operatorBreakdown: Array<{ label: string; value: number }>;
+}
+
 export const SDRSearch: React.FC<SDRSearchProps> = ({ caseId }) => {
   const setWorkspaceContext = useChatbotWorkspaceStore((state) => state.setWorkspaceContext);
   const clearWorkspaceContext = useChatbotWorkspaceStore((state) => state.clearWorkspaceContext);
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<SDRRecord[]>([]);
+  const [resultCount, setResultCount] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
+  const [summaryLoading, setSummaryLoading] = useState(false);
+  const [summary, setSummary] = useState<SdrSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  React.useEffect(() => {
+    markPerformanceEvent('sdr.route-entered', { caseId: caseId || null });
+  }, [caseId]);
+
+  React.useEffect(() => {
+    markPerformanceEvent('sdr.shell-rendered', { caseId: caseId || null });
+  }, [caseId]);
 
   React.useEffect(() => {
     if (!caseId) {
@@ -53,12 +73,59 @@ export const SDRSearch: React.FC<SDRSearchProps> = ({ caseId }) => {
       view: results.length > 0 ? 'results' : 'search',
       searchState: {
         query: query || null,
-        resultCount: results.length,
+        resultCount,
         error: error || null
       },
       selectionTimestamp: new Date().toISOString()
     });
-  }, [caseId, query, results.length, error, setWorkspaceContext, clearWorkspaceContext]);
+  }, [caseId, query, resultCount, results.length, error, setWorkspaceContext, clearWorkspaceContext]);
+
+  React.useEffect(() => {
+    if (!caseId) {
+      setSummary(null);
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadSummary = async () => {
+      try {
+        setSummaryLoading(true);
+        const payload = await trackPerformanceAsync(
+          'sdr.summary.load',
+          () => sdrAPI.getSummary(caseId),
+          { caseId }
+        );
+        if (!cancelled) {
+          setSummary(payload as unknown as SdrSummary);
+        }
+      } catch (summaryError) {
+        console.error('Summary load error:', summaryError);
+        if (!cancelled) {
+          setSummary(null);
+        }
+      } finally {
+        if (!cancelled) {
+          setSummaryLoading(false);
+        }
+      }
+    };
+
+    void loadSummary();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [caseId]);
+
+  React.useEffect(() => {
+    if (summary) {
+      markPerformanceEvent('sdr.summary.loaded', {
+        caseId: caseId || null,
+        totalRecords: Number(summary.totalRecords || 0)
+      });
+    }
+  }, [caseId, summary]);
 
   React.useEffect(() => () => {
     clearWorkspaceContext();
@@ -72,15 +139,30 @@ export const SDRSearch: React.FC<SDRSearchProps> = ({ caseId }) => {
     setError(null);
 
     try {
-      const searchResults = await sdrAPI.search(query.trim(), caseId);
-      setResults(searchResults as unknown as SDRRecord[]);
+      const searchResults = await trackPerformanceAsync(
+        'sdr.search',
+        () => sdrAPI.searchPage(query.trim(), caseId, { page: 1, pageSize: 50 }),
+        { caseId: caseId || null, query: query.trim() }
+      );
+      setResults((searchResults.data || []) as unknown as SDRRecord[]);
+      setResultCount(Number(searchResults.pagination?.total || searchResults.data?.length || 0));
     } catch (err) {
       console.error('Search error:', err);
       setError('Failed to perform search. Please try again.');
+      setResultCount(0);
     } finally {
       setIsLoading(false);
     }
   };
+
+  React.useEffect(() => {
+    if (resultCount > 0) {
+      markPerformanceEvent('sdr.records.first-page-rendered', {
+        caseId: caseId || null,
+        total: resultCount
+      });
+    }
+  }, [caseId, resultCount]);
 
   const formatDate = (dateStr: string) => {
     if (!dateStr) return 'N/A';
@@ -115,6 +197,24 @@ export const SDRSearch: React.FC<SDRSearchProps> = ({ caseId }) => {
 
       {/* Search Form */}
       <div className="p-6 border-b border-border-light dark:border-slate-800 bg-surface-light dark:bg-surface-dark">
+        <div className="mb-5 grid grid-cols-1 gap-3 md:grid-cols-4">
+          {[
+            { label: 'Records', value: summary?.totalRecords ?? 0 },
+            { label: 'Unique MSISDN', value: summary?.uniqueMsisdn ?? 0 },
+            { label: 'Subscribers', value: summary?.uniqueSubscribers ?? 0 },
+            { label: 'Unique IMEI', value: summary?.uniqueImei ?? 0 }
+          ].map((stat) => (
+            <div
+              key={stat.label}
+              className="rounded-xl border border-border-light bg-background-light px-4 py-3 dark:border-slate-800 dark:bg-background-dark"
+            >
+              <div className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">{stat.label}</div>
+              <div className="mt-2 text-2xl font-black text-slate-900 dark:text-white">
+                {summaryLoading ? '...' : Number(stat.value).toLocaleString()}
+              </div>
+            </div>
+          ))}
+        </div>
         <form onSubmit={handleSearch} className="max-w-2xl">
           <div className="flex gap-3">
             <div className="flex-1 relative">
@@ -160,7 +260,7 @@ export const SDRSearch: React.FC<SDRSearchProps> = ({ caseId }) => {
         {results.length > 0 && (
           <div className="mb-4 flex items-center justify-between">
             <h2 className="text-lg font-bold text-slate-900 dark:text-white">
-              Found {results.length} subscriber{results.length !== 1 ? 's' : ''}
+              Found {resultCount.toLocaleString()} subscriber{resultCount !== 1 ? 's' : ''}
             </h2>
           </div>
         )}
